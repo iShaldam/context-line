@@ -236,6 +236,43 @@ class Gap(Base):
         self.assertEqual(self.guard(), "")
         self.assertEqual(self.events(), ["gap_block", "gap_resent"])
 
+    def rows(self, event):
+        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")) as f:
+            return [r for r in (json.loads(l) for l in f) if r.get("event") == event]
+
+    def test_resend_logs_once_per_gap(self):
+        self.idle()
+        for _ in range(3):
+            self.guard()
+        self.assertEqual(self.events(), ["gap_block", "gap_resent"])
+
+    def test_each_new_gap_logs_its_own_resend(self):
+        self.idle()
+        self.guard()
+        self.guard()
+        self.idle(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
+        self.guard()
+        self.guard()
+        self.assertEqual(self.events(), ["gap_block", "gap_resent"] * 2)
+
+    def resend_flag(self, prompt):
+        self.idle()
+        self.guard()
+        self.guard(prompt=prompt)
+        rows = self.rows("gap_resent")
+        self.assertEqual(len(rows), 1)
+        return rows[0]["handoff"]
+
+    def test_resend_flags_the_handoff_command(self):
+        self.assertIs(self.resend_flag("/handoff"), True)
+
+    def test_resend_flags_the_namespaced_handoff_command(self):
+        # the one real /handoff in the transcripts arrived as /context-line:handoff
+        self.assertIs(self.resend_flag("  /context-line:handoff"), True)
+
+    def test_plain_resend_flags_no_handoff(self):
+        self.assertIs(self.resend_flag("go on, not /handoff"), False)
+
     def test_new_gap_after_a_new_turn_blocks_again(self):
         self.idle()
         self.guard()
@@ -365,6 +402,7 @@ class Gap(Base):
         out = self.guard(prompt=prompt)
         self.assertTrue(out.endswith(prompt[:300]))
         self.assertNotIn(prompt[:301], out)
+        self.guard(prompt=prompt)   # the resend
         for name in ("state.json", "nudges.jsonl"):
             with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], name)) as f:
                 self.assertNotIn("secret plan", f.read())

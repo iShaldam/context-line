@@ -378,7 +378,11 @@ def _resume_guard(session_id, transcript, cwd, prompt):
         r["baseline"] = base
     row = {"ts": time.time(), "session": session_id, "ctx": ctx, "gap": int(gap)}
     if r.get("gap_blocked") == when:
-        _log(dict(row, event="gap_resent"))
+        if r.get("gap_resent") != when:   # once per gap, not once per resend
+            # was the resend the advised wrap-up? a flag only, never the prompt
+            wrap = prompt.lstrip().startswith(("/handoff", "/context-line:handoff"))
+            _log(dict(row, event="gap_resent", handoff=wrap))
+            r["gap_resent"] = when
         _save(s)
         return ""
     since, path = r.get("nudged_at"), handoff_path(cwd, session_id)

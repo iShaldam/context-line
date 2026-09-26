@@ -57,4 +57,9 @@ plant "read-only tools count as writes" 's/for t in ("Edit", "Write", "MultiEdit
 plant "write before the nudge counts" 's/if when is None or when < since:/if when is None:/'
 plant "tilde path ignored"      's/tilde = "~" + path\[len(home):\] if/tilde = None if/'
 plant "transcript error escapes the write check" '/^def _wrote/,/^def gap_reason/s/except OSError:/except ZeroDivisionError:/'
+plant "resend logs every time"  's/if r.get("gap_resent") != when:/if True:/'
+plant "resend logged once per session" 's/if r.get("gap_resent") != when:/if not r.get("gap_resent"):/'
+plant "handoff resend not flagged" 's/handoff=wrap)/handoff=False)/'
+plant "namespaced handoff missed" 's|("/handoff", "/context-line:handoff")|("/handoff",)|'
+plant "prompt stored on resend" 's/handoff=wrap)/handoff=wrap, prompt=prompt)/'
 exit $missed
