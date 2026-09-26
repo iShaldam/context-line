@@ -394,14 +394,16 @@ def _resume_guard(session_id, transcript, cwd, prompt):
     if base:
         r["baseline"] = base
     row = {"ts": time.time(), "session": session_id, "ctx": ctx, "gap": int(gap)}
+    # a wrap-up? a flag only, never the prompt
+    wrap = prompt.lstrip().startswith(("/handoff", "/context-line:handoff"))
     if r.get("gap_blocked") == when:
         if r.get("gap_resent") != when:   # once per gap, not once per resend
-            # was the resend the advised wrap-up? a flag only, never the prompt
-            wrap = prompt.lstrip().startswith(("/handoff", "/context-line:handoff"))
             _log(dict(row, event="gap_resent", handoff=wrap))
             r["gap_resent"] = when
         _save(s)
         return ""
+    if wrap:
+        return ""   # already doing what a block would ask for
     # only a handoff this session wrote since its nudge makes holding back pay:
     # without one, /handoff here re-sends it all anyway. A repo's handoff is
     # shared and may predate this session, so its mtime alone can't say.

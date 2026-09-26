@@ -64,5 +64,6 @@ plant "resend logs every time"  's/if r.get("gap_resent") != when:/if True:/'
 plant "resend logged once per session" 's/if r.get("gap_resent") != when:/if not r.get("gap_resent"):/'
 plant "handoff resend not flagged" 's/handoff=wrap)/handoff=False)/'
 plant "namespaced handoff missed" 's|("/handoff", "/context-line:handoff")|("/handoff",)|'
+plant "first /handoff blocked"   's/        return ""   # already doing what/        pass   # already doing what/'
 plant "prompt stored on resend" 's/handoff=wrap)/handoff=wrap, prompt=prompt)/'
 exit $missed
