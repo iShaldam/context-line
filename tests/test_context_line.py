@@ -657,11 +657,9 @@ class NeverBlocks(Base):
         self.assertIn("not sent", out["reason"])
 
     def test_idle_tool_event_never_blocks(self):
-        self.idle()
+        self.handed_off("abc123")   # a prompt here would be held back
         r = self.run_hook(json.dumps(self.tool_payload()))
-        out = json.loads(r.stdout)
-        self.assertNotIn("decision", out)
-        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+        self.assertEqual((r.returncode, r.stdout), (0, ""))   # no block, already nudged
 
     def test_held_back_prompt_does_not_count_toward_grading(self):
         self.handed_off("abc123")   # nudged, wrote its handoff, then sat for 2h
