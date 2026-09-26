@@ -1,6 +1,6 @@
 {
   "name": "context-line",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Nudges you to start a fresh session once context gets heavy, and hands you a copy-ready handoff prompt",
   "author": { "name": "iShaldam" },
   "license": "MIT",
