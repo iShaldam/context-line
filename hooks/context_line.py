@@ -151,6 +151,10 @@ def context_of(transcript):
 
     The time comes from the last row that carries usage, not the last row:
     by the time a prompt hook runs, the new prompt may already be written.
+    If a compaction row is NEWER than that usage row, when is None instead:
+    the next prompt re-sends the compacted context, not the old, larger one,
+    so there is no real "last call" size to warn about. A compaction OLDER
+    than the last usage row doesn't affect when.
     """
     ctx, compacted, when = 0, False, None
     try:
@@ -166,7 +170,7 @@ def context_of(transcript):
         if not ctx:
             ctx = _usage(line)
             if ctx:
-                when = _when(line)
+                when = None if compacted else _when(line)
     return ctx, compacted, when
 
 

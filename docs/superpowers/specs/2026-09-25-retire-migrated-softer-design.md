@@ -96,6 +96,8 @@ subagents. All of these must hold:
 - the session is over the line, as the nudge defines it: `ctx >= line`
   (the learned line) and `ctx - baseline >= CONTEXT_LINE_MIN_GROWTH`
 - this gap hasn't been blocked yet: `state["gap_blocked"] != last_ts`
+- a compaction row newer than the last usage row means no block (the next
+  prompt re-sends the compacted context, not the old one)
 
 A missing or unparseable timestamp, or any error at all, means no block.
 Hooks get the system Python (3.9 on macOS), whose `datetime.fromisoformat`

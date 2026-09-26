@@ -150,6 +150,12 @@ class Timestamps(Base):
     def test_missing_transcript_has_no_time(self):
         self.assertEqual(cl.context_of(os.path.join(self.dir, "nope.jsonl")), (0, False, None))
 
+    def test_compaction_older_than_last_usage_keeps_time(self):
+        t = time.time() - 7200
+        self.write({"isCompactSummary": True}, usage_row(20_000, ts=t - 60),
+                   usage_row(200_000, ts=t))
+        self.assertAlmostEqual(cl.context_of(self.transcript)[2], t, places=2)
+
 
 class MidTurn(Base):
     def test_tool_event_nudges(self):
@@ -196,6 +202,13 @@ class Gap(Base):
         self.assertIn("~200k", out)
         self.assertIn("idle 2h", out)
         self.assertEqual(self.events(), ["gap_block"])
+
+    def test_compaction_newer_than_last_usage_gives_no_time_or_block(self):
+        t = time.time() - 7200
+        self.write(usage_row(20_000, ts=t - 60), usage_row(200_000, ts=t),
+                   {"isCompactSummary": True})
+        self.assertIsNone(cl.context_of(self.transcript)[2])
+        self.assertEqual(self.guard(), "")
 
     def test_short_idle_goes_through(self):
         self.idle(secs=30 * 60)

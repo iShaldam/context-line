@@ -50,4 +50,5 @@ plant "gap check skips the line" 's/if not _heavy(ctx, base, s, cfg):/if False:/
 plant "gap off ignored"         's/ or settings()\["gap"\] <= 0:/:/'
 plant "block on tool events"    's/        if not tool:$/        if True:/'
 plant "broken guard kills nudge" 's/                reason = ""   # a broken guard/                raise   # a broken guard/'
+plant "compaction keeps the stale time" 's/when = None if compacted else _when(line)/when = _when(line)/'
 exit $missed
