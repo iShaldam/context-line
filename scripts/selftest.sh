@@ -4,9 +4,12 @@
 set -u
 root="$(cd "$(dirname "$0")/.." && pwd)"
 missed=0
-plant() {  # name, sed expression
+fresh() {  # a scratch copy of everything the tests read
   tmp="$(mktemp -d)"
-  cp -R "$root/hooks" "$root/tests" "$tmp/"
+  cp -R "$root/hooks" "$root/tests" "$root/commands" "$tmp/"
+}
+plant() {  # name, sed expression
+  fresh
   sed -i.bak "$2" "$tmp/hooks/context_line.py"
   if cmp -s "$tmp/hooks/context_line.py" "$tmp/hooks/context_line.py.bak"; then
     echo "selftest: plant '$1' did not apply -- the canary is stale"; missed=1
@@ -17,6 +20,12 @@ plant() {  # name, sed expression
   fi
   rm -rf "$tmp"
 }
+# control: the unplanted copy must pass, or every plant reads "caught"
+fresh
+if ! (cd "$tmp" && python3 -m unittest discover -s tests >/dev/null 2>&1); then
+  echo "selftest: the unplanted copy fails -- no plant can be trusted"; missed=1
+fi
+rm -rf "$tmp"
 plant "line comparison flipped" 's/ctx >= s\["line"\]/ctx < s["line"]/'
 plant "floor ignored"           's/max(min(cfg\["floor"\], s\["line"\]), s\["line"\] - STEP)/s["line"] - STEP/'
 plant "low line pushed to floor" 's/max(min(cfg\["floor"\], s\["line"\]), /max(cfg["floor"], /'
@@ -34,4 +43,5 @@ plant "quiet tools save state"  's/        if changed:$/        if True:/'
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "tool nudge as plain text" 's/if out and tool:/if False:/'
 plant "no lock on state"        's/            fcntl.flock(lock, fcntl.LOCK_EX)/            pass/'
+plant "rename step dropped"     's/first: rename session <id> to/first: to/'
 exit $missed

@@ -194,6 +194,28 @@ class Learning(Base):
         self.assertEqual(self.state()["line"], 120_000)
 
 
+class DoneLabel(Base):
+    """The old session names itself in the paste block; the new one labels it done."""
+    LINE = 'first: rename session <id> to "done: <title>"'
+
+    def test_nudge_asks_for_the_rename_line(self):
+        self.at(150_000)
+        out = cl.check("s1", self.transcript)
+        self.assertIn(self.LINE, out)
+        self.assertIn('get_session with "self"', out)
+        self.assertIn("don't archive it", out)
+
+    def test_compaction_nudge_asks_too(self):
+        self.write({"isCompactSummary": True}, usage_row(20_000))
+        self.assertIn(self.LINE, cl.check("s1", self.transcript))
+
+    def test_handoff_command_carries_the_same_line(self):
+        with open(os.path.join(ROOT, "commands", "handoff.md")) as f:
+            text = f.read()
+        self.assertIn(self.LINE, text)
+        self.assertIn("don't archive it", text)
+
+
 class HandoffPath(Base):
     def test_git_repo_uses_repo_root(self):
         repo = os.path.join(self.dir, "repo")

@@ -172,6 +172,18 @@ def _settle(s, cfg):
     return graded
 
 
+# The paste block names the old session so the NEW one labels it done:
+# labelling at handoff time would mark it before anything replaced it, and a
+# hook can't reach the desktop app's session tools anyway. Keep the line in
+# sync with commands/handoff.md (a test checks).
+RENAME_STEP = (
+    "if a tool can tell you this session's own id and title (in the Claude desktop "
+    "app: get_session with \"self\"), add one last line to that block, outside any "
+    "word limit:\n"
+    "first: rename session <id> to \"done: <title>\" (skip if it already starts with "
+    "\"done: \"; don't archive it; if the rename fails, say so and carry on)")
+
+
 def message(ctx, compacted, n, path):
     why = ("this session was compacted, so earlier detail is already lossy"
            if compacted else f"this session carries ~{ctx // 1000}k tokens, re-sent every turn")
@@ -182,7 +194,7 @@ def message(ctx, compacted, n, path):
             f"runs). Then (1) add a dated section to {path} with what is done, what is next "
             "and any decisions made, keeping what is already there, (2) end with exactly ONE "
             "fenced ```text block for the user to paste into a new session: the one job, "
-            f"'read {path} first', and the first next step.")
+            f"'read {path} first', and the first next step. (3) {RENAME_STEP}")
 
 
 def check(session_id, transcript, cwd="", event="prompt"):
