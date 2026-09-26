@@ -179,6 +179,83 @@ class MidTurn(Base):
         self.assertEqual(self.state()["line"], 140_000)
 
 
+class Gap(Base):
+    """A heavy session idle past the prompt cache: hold the first prompt back once."""
+
+    def guard(self, **kw):
+        return cl.resume_guard("s1", self.transcript, self.dir, **kw)
+
+    def events(self):
+        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")) as f:
+            return [json.loads(l).get("event") for l in f]
+
+    def test_idle_heavy_session_is_held_back(self):
+        self.idle()
+        out = self.guard()
+        self.assertIn("not sent", out)
+        self.assertIn("~200k", out)
+        self.assertIn("idle 2h", out)
+        self.assertEqual(self.events(), ["gap_block"])
+
+    def test_short_idle_goes_through(self):
+        self.idle(secs=30 * 60)
+        self.assertEqual(self.guard(), "")
+
+    def test_under_line_goes_through(self):
+        self.idle(ctx=140_000)
+        self.assertEqual(self.guard(), "")
+
+    def test_under_min_growth_goes_through(self):
+        self.idle(ctx=160_000, base=130_000)
+        self.assertEqual(self.guard(), "")
+
+    def test_resend_goes_through(self):
+        self.idle()
+        self.assertTrue(self.guard())
+        self.assertEqual(self.guard(), "")
+        self.assertEqual(self.events(), ["gap_block", "gap_resent"])
+
+    def test_new_gap_after_a_new_turn_blocks_again(self):
+        self.idle()
+        self.guard()
+        self.guard()
+        self.idle(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
+        self.assertIn("not sent", self.guard())
+
+    def test_gap_zero_turns_it_off(self):
+        os.environ["CONTEXT_LINE_GAP"] = "0"
+        self.idle()
+        self.assertEqual(self.guard(), "")
+
+    def test_missing_timestamp_goes_through(self):
+        self.at(200_000)
+        self.assertEqual(self.guard(), "")
+
+    def test_reason_points_at_existing_handoff(self):
+        path = os.path.join(self.dir, "HANDOFF.md")
+        os.environ["CONTEXT_LINE_HANDOFF"] = path
+        open(path, "w").close()
+        self.idle()
+        out = self.guard()
+        self.assertIn(path, out)
+        self.assertIn("updated", out)
+        self.assertNotIn("send /handoff", out)
+
+    def test_reason_suggests_handoff_when_none_exists(self):
+        self.idle()
+        self.assertIn("send /handoff", self.guard())
+
+    def test_prompt_echoed_but_never_stored(self):
+        prompt = "secret plan " + "x" * 400
+        self.idle()
+        out = self.guard(prompt=prompt)
+        self.assertTrue(out.endswith(prompt[:300]))
+        self.assertNotIn(prompt[:301], out)
+        for name in ("state.json", "nudges.jsonl"):
+            with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], name)) as f:
+                self.assertNotIn("secret plan", f.read())
+
+
 class Learning(Base):
     def ignore_one(self, sid):
         self.at(150_000)

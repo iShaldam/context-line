@@ -44,4 +44,8 @@ plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "tool nudge as plain text" 's/if out and tool:/if False:/'
 plant "no lock on state"        's/            fcntl.flock(lock, fcntl.LOCK_EX)/            pass/'
 plant "rename step dropped"     's/first: rename session <id> to/first: to/'
+plant "gap comparison flipped"  's/if gap < cfg\["gap"\]:/if gap >= cfg["gap"]:/'
+plant "resend blocked again"    's/if r.get("gap_blocked") == when:/if False:/'
+plant "gap check skips the line" 's/if not _heavy(ctx, base, s, cfg):/if False:/'
+plant "gap off ignored"         's/ or settings()\["gap"\] <= 0:/:/'
 exit $missed

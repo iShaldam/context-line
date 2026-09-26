@@ -46,6 +46,7 @@ def settings():
         "floor": _int_env("CONTEXT_LINE_FLOOR", 80000),
         "min_growth": _int_env("CONTEXT_LINE_MIN_GROWTH", 40000),
         "adapt": os.environ.get("CONTEXT_LINE_ADAPT", "1") != "0",
+        "gap": _int_env("CONTEXT_LINE_GAP", 3600),
     }
 
 
@@ -271,6 +272,75 @@ def _check(session_id, transcript, cwd, event):
           "ctx": ctx, "compacted": compacted, "line": s["line"], "n": n})
     _save(s)
     return message(ctx, compacted, n, handoff_path(cwd, session_id))
+
+
+def _ago(secs):
+    secs = int(secs)
+    if secs >= 3600:
+        return f"{secs // 3600}h"
+    if secs >= 60:
+        return f"{secs // 60}m"
+    return f"{secs}s"
+
+
+def gap_reason(ctx, gap, path, prompt=""):
+    """What the held-back prompt would cost. Shown to the user, never the model."""
+    k = ctx // 1000
+    if os.path.exists(path):
+        cheaper = (f"start a new session and read {path} "
+                   f"(updated {_ago(time.time() - os.path.getmtime(path))} ago)")
+    else:
+        cheaper = "send /handoff once to wrap up here, then start a new session from it"
+    out = (f"context-line: not sent. This session carries ~{k}k and sat idle {_ago(gap)}, "
+           f"past the prompt cache, so this prompt would re-send all {k}k. Cheaper: "
+           f"{cheaper}. To go on here, send it again.")
+    if prompt:   # the app may drop a blocked prompt; shown to the user, never stored
+        out += "\n\nYour prompt, to copy back:\n" + prompt[:300]
+    return out
+
+
+def resume_guard(session_id, transcript, cwd="", prompt=""):
+    """The reason to hold this prompt back, or '' to let it through.
+
+    A session idle past the prompt cache re-sends all of its context on the
+    next prompt. When that session is over the line, hold the first prompt
+    back once and say what it would cost; the same prompt sent again goes
+    through (no API call has happened since, so the last call's time matches).
+    """
+    if not session_id or not transcript or settings()["gap"] <= 0:
+        return ""
+    os.makedirs(state_dir(), exist_ok=True)
+    with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
+        if fcntl:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        return _resume_guard(session_id, transcript, cwd, prompt)
+
+
+def _resume_guard(session_id, transcript, cwd, prompt):
+    cfg = settings()
+    ctx, _, when = context_of(transcript)
+    if when is None:
+        return ""
+    gap = time.time() - when
+    if gap < cfg["gap"]:
+        return ""
+    s = _load(cfg)
+    r = s["sessions"].setdefault(session_id, {})
+    base = r.get("baseline") or baseline_of(transcript)
+    if not _heavy(ctx, base, s, cfg):
+        return ""
+    r["seen"] = time.time()
+    if base:
+        r["baseline"] = base
+    row = {"ts": time.time(), "session": session_id, "ctx": ctx, "gap": int(gap)}
+    if r.get("gap_blocked") == when:
+        _log(dict(row, event="gap_resent"))
+        _save(s)
+        return ""
+    r["gap_blocked"] = when
+    _log(dict(row, event="gap_block"))
+    _save(s)
+    return gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt)
 
 
 def main():
