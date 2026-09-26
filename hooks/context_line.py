@@ -34,6 +34,8 @@ TAKEN_WITHIN = 2     # prompts after a nudge that still count as acting on it
 QUIET = 3600         # seconds of silence after a nudge that count as taken
 TAIL = 400_000       # bytes of transcript to read from the end
 HEAD = 2_000_000     # bytes to search from the start for the first usage row
+LOCK_TRIES = 10      # tries at the state lock before giving up on this event
+LOCK_WAIT = 0.05     # seconds between tries
 
 
 def _int_env(name, default):
@@ -233,6 +235,20 @@ def _heavy(ctx, base, s, cfg):
     return ctx >= s["line"] and ctx - base >= cfg["min_growth"]
 
 
+def _lock(f):
+    """Take the state lock without waiting on a stuck holder: a few short
+    tries, then False and the caller stays silent (fail open)."""
+    if not fcntl:
+        return True
+    for _ in range(LOCK_TRIES):
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            time.sleep(LOCK_WAIT)
+    return False
+
+
 def check(session_id, transcript, cwd="", event="prompt"):
     """Return an instruction for the model, or '' when the session is fine.
 
@@ -244,8 +260,8 @@ def check(session_id, transcript, cwd="", event="prompt"):
         return ""
     os.makedirs(state_dir(), exist_ok=True)
     with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
-        if fcntl:   # parallel tool calls fire their hooks at the same moment
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        if not _lock(lock):   # parallel tool calls fire their hooks at the same moment
+            return ""
         return _check(session_id, transcript, cwd, event)
 
 
@@ -356,8 +372,8 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
         return ""
     os.makedirs(state_dir(), exist_ok=True)
     with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
-        if fcntl:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        if not _lock(lock):
+            return ""
         return _resume_guard(session_id, transcript, cwd, prompt)
 
 
