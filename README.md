@@ -44,6 +44,9 @@ The prompt cache lasts about an hour. Come back to a heavy session after
 that and your next prompt re-sends the whole thing, so the first prompt
 after an hour idle is held back once, with the cost and the handoff spelled
 out. Send it again to go on. It only fires on sessions already over the line.
+Scripts and agents that resume heavy sessions (`claude -p --resume`, the
+SDK, scheduled jobs) have nobody to send it again, so run them with
+`CONTEXT_LINE_GAP=0`.
 
 ## install
 
