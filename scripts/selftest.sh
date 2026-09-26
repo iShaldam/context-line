@@ -48,4 +48,6 @@ plant "gap comparison flipped"  's/if gap < cfg\["gap"\]:/if gap >= cfg["gap"]:/
 plant "resend blocked again"    's/if r.get("gap_blocked") == when:/if False:/'
 plant "gap check skips the line" 's/if not _heavy(ctx, base, s, cfg):/if False:/'
 plant "gap off ignored"         's/ or settings()\["gap"\] <= 0:/:/'
+plant "block on tool events"    's/        if not tool:$/        if True:/'
+plant "broken guard kills nudge" 's/                reason = ""   # a broken guard/                raise   # a broken guard/'
 exit $missed

@@ -349,8 +349,17 @@ def main():
         if p.get("agent_id"):
             return 0   # a subagent's tool call; its parent gets checked on its own
         tool = p.get("hook_event_name") == "PostToolUse"
-        out = check(p.get("session_id"), p.get("transcript_path"), p.get("cwd") or "",
-                    event="tool" if tool else "prompt")
+        sid, transcript = p.get("session_id"), p.get("transcript_path")
+        cwd = p.get("cwd") or ""
+        if not tool:
+            try:
+                reason = resume_guard(sid, transcript, cwd, p.get("prompt") or "")
+            except Exception:
+                reason = ""   # a broken guard never blocks, and never costs the nudge
+            if reason:   # held back once; the same prompt sent again goes through
+                print(json.dumps({"decision": "block", "reason": reason}))
+                return 0
+        out = check(sid, transcript, cwd, event="tool" if tool else "prompt")
         if out and tool:   # plain stdout only reaches the model on UserPromptSubmit
             out = json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PostToolUse", "additionalContext": out}})

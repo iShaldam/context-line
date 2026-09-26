@@ -1,5 +1,5 @@
 """Synthetic transcripts only -- nothing here comes from a real session."""
-import datetime, json, os, subprocess, sys, tempfile, time, unittest
+import contextlib, datetime, io, json, os, subprocess, sys, tempfile, time, unittest
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -382,6 +382,52 @@ class NeverBlocks(Base):
         env = dict(os.environ, PATH="/usr/bin:/bin")   # hooks don't get your PATH
         return subprocess.run([sys.executable, HOOK], input=stdin, text=True,
                               capture_output=True, env=env, timeout=10)
+
+    def prompt_payload(self, **extra):
+        return dict({"session_id": "abc123", "transcript_path": self.transcript,
+                     "cwd": self.dir, "permission_mode": "default",
+                     "hook_event_name": "UserPromptSubmit", "prompt": "hi"}, **extra)
+
+    def test_idle_prompt_prints_block_json(self):
+        self.idle()
+        r = self.run_hook(json.dumps(self.prompt_payload()))
+        self.assertEqual(r.returncode, 0)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("not sent", out["reason"])
+
+    def test_idle_tool_event_never_blocks(self):
+        self.idle()
+        r = self.run_hook(json.dumps(self.tool_payload()))
+        out = json.loads(r.stdout)
+        self.assertNotIn("decision", out)
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+
+    def test_held_back_prompt_does_not_count_toward_grading(self):
+        self.write(usage_row(20_000, ts=time.time() - 60), usage_row(200_000, ts=time.time()))
+        self.assertTrue(cl.check("abc123", self.transcript))   # nudged
+        self.idle()                                            # then it sat for 2h
+        r = self.run_hook(json.dumps(self.prompt_payload()))
+        self.assertEqual(json.loads(r.stdout)["decision"], "block")
+        self.assertEqual(self.state()["sessions"]["abc123"]["prompts_since_nudge"], 0)
+
+    def test_broken_guard_still_nudges(self):
+        self.at(160_000)
+        out = io.StringIO()
+        with mock.patch.object(cl, "resume_guard", side_effect=RuntimeError("boom")), \
+                mock.patch("sys.stdin", io.StringIO(json.dumps(self.prompt_payload()))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(cl.main(), 0)
+        self.assertIn("START A FRESH SESSION", out.getvalue())
+
+    @unittest.skipUnless(os.path.exists("/usr/bin/python3"), "no system python here")
+    def test_system_python_parses_timestamps(self):
+        # hooks get the system python (3.9 on macOS); its fromisoformat rejects a trailing Z
+        self.idle()
+        env = dict(os.environ, PATH="/usr/bin:/bin")
+        r = subprocess.run(["/usr/bin/python3", HOOK], input=json.dumps(self.prompt_payload()),
+                           text=True, capture_output=True, env=env, timeout=10)
+        self.assertEqual(json.loads(r.stdout)["decision"], "block")
 
     def test_real_shaped_payload_through_entry_point(self):
         self.at(160_000)
