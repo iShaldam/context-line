@@ -290,16 +290,47 @@ def _ago(secs):
     return f"{secs}s"
 
 
+def _wrote(transcript, path, since):
+    """True if this session's transcript tail shows a write-ish tool_use for
+    `path` (absolute or ~/ form) at or after `since`. A repo's HANDOFF.md is
+    shared across sessions, so its mtime alone can't say whose it is. A
+    read-only mention never counts, and any error counts as not written.
+    """
+    if since is None:
+        return False
+    home = os.path.expanduser("~")
+    tilde = "~" + path[len(home):] if path.startswith(home + os.sep) else None
+    try:
+        with open(transcript, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - TAIL))
+            lines = f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        if path not in line and (tilde is None or tilde not in line):
+            continue   # matched raw: a path with spaces must still match
+        when = _when(line)
+        if when is None or when < since:
+            continue
+        squeezed = line.replace(" ", "")
+        if any(f'"name":"{t}"' in squeezed for t in ("Edit", "Write", "MultiEdit", "Bash")):
+            return True
+    return False
+
+
 def gap_reason(ctx, gap, path, prompt="", since=None):
     """What the held-back prompt would cost. Shown to the user, never the model.
 
-    The handoff is named only if it was written at or after this session's
-    last nudge (since); a repo's handoff is shared and may predate this
-    session, so following a stale one could lose this session's own work.
-    Otherwise the text suggests /handoff.
+    The handoff (path, or None when this session didn't write it) is named
+    only if it was written at or after this session's last nudge (since); a
+    repo's handoff is shared and may predate this session, so following a
+    stale one could lose this session's own work. Otherwise the text
+    suggests /handoff.
     """
     k = ctx // 1000
-    if since is not None and os.path.exists(path) and os.path.getmtime(path) >= since:
+    if (path and since is not None and os.path.exists(path)
+            and os.path.getmtime(path) >= since):
         cheaper = (f"start a new session and read {path} "
                    f"(updated {_ago(time.time() - os.path.getmtime(path))} ago)")
     else:
@@ -350,7 +381,9 @@ def _resume_guard(session_id, transcript, cwd, prompt):
         _log(dict(row, event="gap_resent"))
         _save(s)
         return ""
-    reason = gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt, since=r.get("nudged_at"))
+    since, path = r.get("nudged_at"), handoff_path(cwd, session_id)
+    mine = path if _wrote(transcript, path, since) else None
+    reason = gap_reason(ctx, gap, mine, prompt, since=since)
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
     _save(s)

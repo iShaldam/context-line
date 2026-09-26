@@ -17,6 +17,14 @@ def usage_row(ctx, ts=None):
     return row
 
 
+def edit_row(path, ts, ctx=200_000, tool="Edit"):
+    """An assistant turn that runs `tool` on `path`: a tool_use row that carries usage."""
+    row = usage_row(ctx, ts=ts)
+    inp = {"command": f"cat >> {path}"} if tool == "Bash" else {"file_path": path}
+    row["message"]["content"] = [{"type": "tool_use", "name": tool, "input": inp}]
+    return row
+
+
 def iso(t):
     """A transcript timestamp: UTC, milliseconds, trailing Z."""
     d = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
@@ -244,19 +252,82 @@ class Gap(Base):
         self.at(200_000)
         self.assertEqual(self.guard(), "")
 
-    def test_reason_points_at_existing_handoff(self):
-        path = os.path.join(self.dir, "HANDOFF.md")
-        os.environ["CONTEXT_LINE_HANDOFF"] = path
+    def nudged(self, ago=3 * 3600):
+        """Nudge s1, then move its nudge `ago` seconds back. Returns nudged_at."""
         self.idle()
-        cl.check("s1", self.transcript)   # nudges: sets nudged_at
+        cl.check("s1", self.transcript)
         s = self.state()
-        s["sessions"]["s1"]["nudged_at"] -= 60   # avoid mtime-granularity flakiness
+        t = s["sessions"]["s1"]["nudged_at"] = time.time() - ago
         cl._save(s)
+        return t
+
+    def handoff(self, mtime=None):
+        """A handoff file on disk (the override path), optionally back-dated."""
+        path = os.environ["CONTEXT_LINE_HANDOFF"] = os.path.join(self.dir, "HANDOFF.md")
         open(path, "w").close()
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def after_nudge(self, t, *rows):
+        """A transcript that crossed the line around the nudge at `t`, then `rows`."""
+        self.write(usage_row(20_000, ts=t - 60), usage_row(190_000, ts=t + 60), *rows)
+
+    def test_reason_points_at_existing_handoff(self):
+        t = self.nudged()
+        path = self.handoff()   # written now, after the nudge
+        self.after_nudge(t, edit_row(path, ts=time.time() - 2 * 3600))
         out = self.guard()
         self.assertIn(path, out)
         self.assertIn("updated", out)
         self.assertNotIn("send /handoff", out)
+
+    def test_handoff_written_by_another_session_is_not_named(self):
+        # a repo's HANDOFF.md is shared: fresh on disk, but this transcript never wrote it
+        t = self.nudged()
+        path = self.handoff()
+        self.after_nudge(t, usage_row(200_000, ts=time.time() - 2 * 3600))
+        out = self.guard()
+        self.assertIn("send /handoff", out)
+        self.assertNotIn(path, out)
+
+    def test_read_only_mention_is_not_a_write(self):
+        t = self.nudged()
+        path = self.handoff()
+        self.after_nudge(t, edit_row(path, ts=time.time() - 2 * 3600, tool="Read"))
+        out = self.guard()
+        self.assertIn("send /handoff", out)
+        self.assertNotIn(path, out)
+
+    def test_write_before_the_nudge_is_not_named(self):
+        # this session wrote it once, before the nudge; someone else touched it since
+        t = self.nudged()
+        path = self.handoff()
+        self.write(usage_row(20_000, ts=t - 120), edit_row(path, ts=t - 60),
+                   usage_row(190_000, ts=t + 60), usage_row(200_000, ts=time.time() - 2 * 3600))
+        out = self.guard()
+        self.assertIn("send /handoff", out)
+        self.assertNotIn(path, out)
+
+    def test_written_but_stale_on_disk_suggests_handoff_command(self):
+        # written after the nudge, but the file on disk predates it (reverted):
+        # the mtime check must still bite even though the write check passes
+        t = self.nudged()
+        path = self.handoff(mtime=t - 60)
+        self.after_nudge(t, edit_row(path, ts=time.time() - 2 * 3600))
+        out = self.guard()
+        self.assertIn("send /handoff", out)
+        self.assertNotIn(path, out)
+
+    def test_bash_write_to_tilde_path_counts(self):
+        # never create files under the real home: unit-test _wrote directly
+        self.write(edit_row("~/x/HANDOFF.md", ts=time.time() - 60, tool="Bash"))
+        path = os.path.join(os.path.expanduser("~"), "x", "HANDOFF.md")
+        self.assertTrue(cl._wrote(self.transcript, path, time.time() - 3600))
+
+    def test_unreadable_transcript_is_not_a_write(self):
+        missing = os.path.join(self.dir, "gone.jsonl")
+        self.assertFalse(cl._wrote(missing, os.path.join(self.dir, "HANDOFF.md"), 0))
 
     def test_stale_handoff_suggests_handoff_command(self):
         path = os.path.join(self.dir, "HANDOFF.md")
