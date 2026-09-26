@@ -19,8 +19,17 @@ plant() {  # name, sed expression
 }
 plant "line comparison flipped" 's/ctx >= s\["line"\]/ctx < s["line"]/'
 plant "floor ignored"           's/max(cfg\["floor"\], s\["line"\] - STEP)/s["line"] - STEP/'
-plant "adapt flag ignored"      's/if cfg\["adapt"\]:/if True:/'
+plant "adapt flag ignored"      's/ and cfg\["adapt"\]:/:/'
 plant "renudge gap dropped"     's/ctx >= last + RENUDGE/True/'
 plant "errors escape main"      's/        pass   # silence/        raise/'
 plant "compaction ignored"      's/compacted = True$/compacted = False/'
+plant "min growth ignored"      's/ctx - base >= cfg\["min_growth"\]/True/'
+plant "baseline ignored"        's/base = r.get("baseline") or baseline_of(transcript)/base = 0/'
+plant "baseline from the tail"  's/            read = 0$/            f.seek(max(0, f.seek(0, 2) - TAIL)); read = 0/'
+plant "tools count as prompts"  's/if prompt and r.get("nudged_at"):/if r.get("nudged_at"):/'
+plant "kept going not graded"   's/ctx >= last + KEPT_GOING:/False:/'
+plant "graded every nudge"      's/prompts_since_nudge=0)$/prompts_since_nudge=0, graded=None)/'
+plant "quiet tools save state"  's/        if changed:$/        if True:/'
+plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
+plant "tool nudge as plain text" 's/if out and tool:/if False:/'
 exit $missed

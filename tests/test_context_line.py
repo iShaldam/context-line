@@ -35,25 +35,39 @@ class Base(unittest.TestCase):
             for r in rows:
                 f.write((r if isinstance(r, str) else json.dumps(r)) + "\n")
 
+    def at(self, ctx, base=20_000):
+        """A session that started at `base` tokens and now carries `ctx`."""
+        self.write(usage_row(base), usage_row(ctx))
+
+    def state_file(self):
+        return os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.json")
+
     def state(self):
-        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.json")) as f:
+        with open(self.state_file()) as f:
             return json.load(f)
 
 
 class Threshold(Base):
     def test_under_line_is_silent(self):
-        self.write(usage_row(149_999))
+        self.at(149_999)
         self.assertEqual(cl.check("s1", self.transcript), "")
 
     def test_over_line_nudges(self):
-        self.write(usage_row(150_000))
+        self.at(150_000)
         out = cl.check("s1", self.transcript)
         self.assertIn("START A FRESH SESSION", out)
         self.assertIn("~150k tokens", out)
         self.assertIn("```text", out)
 
+    def test_nudge_says_stop_not_finish(self):
+        # "finish or pause the current step" read as permission to keep browsing
+        self.at(150_000)
+        out = cl.check("s1", self.transcript)
+        self.assertIn("stop at the next safe point", out)
+        self.assertNotIn("finish or pause", out)
+
     def test_last_usage_row_wins(self):
-        self.write(usage_row(200_000), {"type": "user"}, usage_row(90_000))
+        self.write(usage_row(20_000), usage_row(200_000), {"type": "user"}, usage_row(90_000))
         self.assertEqual(cl.check("s1", self.transcript), "")
 
     def test_compacted_nudges_once_even_when_small(self):
@@ -62,23 +76,74 @@ class Threshold(Base):
         self.assertEqual(cl.check("s1", self.transcript), "")
 
     def test_renudge_needs_growth_and_escalates(self):
-        self.write(usage_row(150_000))
+        self.at(150_000)
         self.assertTrue(cl.check("s1", self.transcript))
-        self.write(usage_row(200_000))
+        self.at(175_000)
         self.assertEqual(cl.check("s1", self.transcript), "")
-        self.write(usage_row(210_000))
+        self.at(180_000)
         out = cl.check("s1", self.transcript)
         self.assertIn("nudge #2", out)
 
     def test_env_line_is_respected(self):
+        os.environ["CONTEXT_LINE_LINE"] = "100000"
+        self.at(100_000)
+        self.assertTrue(cl.check("s1", self.transcript))
+
+
+class Baseline(Base):
+    """A fresh session already carries ~100k of tools and skills; only growth counts."""
+
+    def test_big_start_without_growth_is_silent(self):
+        self.at(155_000, base=120_000)
+        self.assertEqual(cl.check("s1", self.transcript), "")
+
+    def test_enough_growth_past_the_line_nudges(self):
+        self.at(160_000, base=120_000)
+        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+
+    def test_baseline_comes_from_session_start_not_tail(self):
+        pad = {"type": "user", "message": {"content": "x" * (cl.TAIL + 10)}}
+        self.write(usage_row(20_000), pad, usage_row(150_000), usage_row(160_000))
+        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+
+    def test_min_growth_env_zero_for_canaries(self):
         os.environ["CONTEXT_LINE_LINE"] = "1000"
+        os.environ["CONTEXT_LINE_MIN_GROWTH"] = "0"
         self.write(usage_row(1_000))
         self.assertTrue(cl.check("s1", self.transcript))
 
 
+class MidTurn(Base):
+    def test_tool_event_nudges(self):
+        self.at(150_000)
+        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript, event="tool"))
+
+    def test_quiet_tool_event_writes_no_state(self):
+        self.at(50_000)
+        self.assertEqual(cl.check("s1", self.transcript, event="tool"), "")
+        self.assertFalse(os.path.exists(self.state_file()))
+
+    def test_tool_event_does_not_count_as_prompt(self):
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        for _ in range(cl.TAKEN_WITHIN):
+            cl.check("s1", self.transcript)
+        cl.check("s1", self.transcript, event="tool")
+        self.assertIsNone(self.state()["sessions"]["s1"].get("graded"))
+        self.assertEqual(self.state()["line"], 150_000)
+
+    def test_model_keeping_going_is_ignored(self):
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        self.at(170_000)
+        cl.check("s1", self.transcript, event="tool")
+        self.assertEqual(self.state()["sessions"]["s1"]["graded"], "ignored")
+        self.assertEqual(self.state()["line"], 140_000)
+
+
 class Learning(Base):
     def ignore_one(self, sid):
-        self.write(usage_row(150_000))
+        self.at(150_000)
         cl.check(sid, self.transcript)
         for _ in range(cl.TAKEN_WITHIN + 1):
             cl.check(sid, self.transcript)
@@ -98,8 +163,16 @@ class Learning(Base):
         self.ignore_one("s1")
         self.assertEqual(self.state()["line"], 150_000)
 
+    def test_grade_once_per_session(self):
+        self.ignore_one("s1")
+        self.at(185_000)
+        self.assertIn("nudge #2", cl.check("s1", self.transcript))
+        for _ in range(cl.TAKEN_WITHIN + 1):
+            cl.check("s1", self.transcript)
+        self.assertEqual(self.state()["line"], 140_000)
+
     def test_quiet_session_is_taken(self):
-        self.write(usage_row(150_000))
+        self.at(150_000)
         cl.check("s1", self.transcript)
         s = self.state()
         s["sessions"]["s1"]["seen"] = time.time() - cl.QUIET - 1
@@ -141,13 +214,34 @@ class NeverBlocks(Base):
                               capture_output=True, env=env, timeout=10)
 
     def test_real_shaped_payload_through_entry_point(self):
-        self.write(usage_row(160_000))
+        self.at(160_000)
         payload = {"session_id": "abc123", "transcript_path": self.transcript,
                    "cwd": self.dir, "permission_mode": "default",
                    "hook_event_name": "UserPromptSubmit", "prompt": "hi"}
         r = self.run_hook(json.dumps(payload))
         self.assertEqual(r.returncode, 0)
         self.assertIn("START A FRESH SESSION", r.stdout)
+
+    def tool_payload(self, **extra):
+        return dict({"session_id": "abc123", "transcript_path": self.transcript,
+                     "cwd": self.dir, "permission_mode": "default",
+                     "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                     "tool_input": {"command": "ls"}, "tool_response": {"stdout": ""},
+                     "tool_use_id": "toolu_1"}, **extra)
+
+    def test_post_tool_use_reaches_model_as_json(self):
+        # plain stdout only reaches the model on UserPromptSubmit
+        self.at(160_000)
+        r = self.run_hook(json.dumps(self.tool_payload()))
+        self.assertEqual(r.returncode, 0)
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["hookEventName"], "PostToolUse")
+        self.assertIn("START A FRESH SESSION", out["additionalContext"])
+
+    def test_subagent_tool_use_is_skipped(self):
+        self.at(160_000)
+        r = self.run_hook(json.dumps(self.tool_payload(agent_id="a1", agent_type="Explore")))
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
 
     def test_garbage_stdin_is_silent(self):
         r = self.run_hook("not json{")
@@ -162,7 +256,7 @@ class NeverBlocks(Base):
 
     def test_unwritable_state_is_silent(self):
         os.environ["CLAUDE_PLUGIN_DATA"] = "/dev/null/state"
-        self.write(usage_row(200_000))
+        self.at(200_000)
         r = self.run_hook(json.dumps({"session_id": "a", "transcript_path": self.transcript}))
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
