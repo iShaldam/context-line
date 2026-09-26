@@ -41,6 +41,8 @@ class Base(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, env)
         self.env.start()
         os.environ.pop("CONTEXT_LINE_HANDOFF", None)
+        for k in ("CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED"):
+            os.environ.pop(k, None)   # the suite may itself run under claude -p
         self.transcript = os.path.join(self.dir, "t.jsonl")
 
     def tearDown(self):
@@ -60,6 +62,21 @@ class Base(unittest.TestCase):
         """A session whose last API call was `secs` ago."""
         now = time.time()
         self.write(usage_row(base, ts=now - secs - 60), usage_row(ctx, ts=now - secs))
+
+    def handed_off(self, sid="s1", ctx=200_000, base=20_000, secs=2 * 3600):
+        """idle(), but s1 was nudged and then wrote its handoff before going
+        quiet: the one case the resume guard holds a prompt back."""
+        now = time.time()
+        t = now - secs - 600
+        path = os.environ["CONTEXT_LINE_HANDOFF"] = os.path.join(self.dir, "HANDOFF.md")
+        open(path, "w").close()
+        self.write(usage_row(base, ts=t - 60), usage_row(ctx, ts=t),
+                   edit_row(path, ts=now - secs, ctx=ctx))
+        s = cl._load(cl.settings())
+        s["sessions"].setdefault(sid, {}).update(
+            seen=now, nudged_at=t, nudge_ctx=ctx, nudges=1, prompts_since_nudge=0)
+        cl._save(s)
+        return path
 
     def state_file(self):
         return os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.json")
@@ -204,7 +221,7 @@ class Gap(Base):
             return [json.loads(l).get("event") for l in f]
 
     def test_idle_heavy_session_is_held_back(self):
-        self.idle()
+        self.handed_off()
         out = self.guard()
         self.assertIn("not sent", out)
         self.assertIn("~200k", out)
@@ -219,19 +236,19 @@ class Gap(Base):
         self.assertEqual(self.guard(), "")
 
     def test_short_idle_goes_through(self):
-        self.idle(secs=30 * 60)
+        self.handed_off(secs=30 * 60)
         self.assertEqual(self.guard(), "")
 
     def test_under_line_goes_through(self):
-        self.idle(ctx=140_000)
+        self.handed_off(ctx=140_000)
         self.assertEqual(self.guard(), "")
 
     def test_under_min_growth_goes_through(self):
-        self.idle(ctx=160_000, base=130_000)
+        self.handed_off(ctx=160_000, base=130_000)
         self.assertEqual(self.guard(), "")
 
     def test_resend_goes_through(self):
-        self.idle()
+        self.handed_off()
         self.assertTrue(self.guard())
         self.assertEqual(self.guard(), "")
         self.assertEqual(self.events(), ["gap_block", "gap_resent"])
@@ -241,22 +258,22 @@ class Gap(Base):
             return [r for r in (json.loads(l) for l in f) if r.get("event") == event]
 
     def test_resend_logs_once_per_gap(self):
-        self.idle()
+        self.handed_off()
         for _ in range(3):
             self.guard()
         self.assertEqual(self.events(), ["gap_block", "gap_resent"])
 
     def test_each_new_gap_logs_its_own_resend(self):
-        self.idle()
+        self.handed_off()
         self.guard()
         self.guard()
-        self.idle(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
+        self.handed_off(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
         self.guard()
         self.guard()
         self.assertEqual(self.events(), ["gap_block", "gap_resent"] * 2)
 
     def resend_flag(self, prompt):
-        self.idle()
+        self.handed_off()
         self.guard()
         self.guard(prompt=prompt)
         rows = self.rows("gap_resent")
@@ -274,20 +291,33 @@ class Gap(Base):
         self.assertIs(self.resend_flag("go on, not /handoff"), False)
 
     def test_new_gap_after_a_new_turn_blocks_again(self):
-        self.idle()
+        self.handed_off()
         self.guard()
         self.guard()
-        self.idle(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
+        self.handed_off(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
         self.assertIn("not sent", self.guard())
 
     def test_gap_zero_turns_it_off(self):
         os.environ["CONTEXT_LINE_GAP"] = "0"
-        self.idle()
+        self.handed_off()
         self.assertEqual(self.guard(), "")
 
     def test_missing_timestamp_goes_through(self):
         self.at(200_000)
         self.assertEqual(self.guard(), "")
+
+    def test_headless_runs_go_through(self):
+        # claude -p --resume, the SDK, scheduled jobs: nobody is there to send it again
+        for env in ({"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}, {"CLAUDE_CODE_ENTRYPOINT": "sdk-ts"},
+                    {"CLAUDE_CODE_SESSION_ATTENDED": "0"}):
+            with mock.patch.dict(os.environ, env):
+                self.handed_off()
+                self.assertEqual(self.guard(), "")
+
+    def test_interactive_entrypoints_still_guard(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}):
+            self.handed_off()
+            self.assertIn("not sent", self.guard())
 
     def nudged(self, ago=3 * 3600):
         """Nudge s1, then move its nudge `ago` seconds back. Returns nudged_at."""
@@ -324,17 +354,13 @@ class Gap(Base):
         t = self.nudged()
         path = self.handoff()
         self.after_nudge(t, usage_row(200_000, ts=time.time() - 2 * 3600))
-        out = self.guard()
-        self.assertIn("send /handoff", out)
-        self.assertNotIn(path, out)
+        self.assertEqual(self.guard(), "")
 
     def test_read_only_mention_is_not_a_write(self):
         t = self.nudged()
         path = self.handoff()
         self.after_nudge(t, edit_row(path, ts=time.time() - 2 * 3600, tool="Read"))
-        out = self.guard()
-        self.assertIn("send /handoff", out)
-        self.assertNotIn(path, out)
+        self.assertEqual(self.guard(), "")
 
     def test_write_before_the_nudge_is_not_named(self):
         # this session wrote it once, before the nudge; someone else touched it since
@@ -342,19 +368,15 @@ class Gap(Base):
         path = self.handoff()
         self.write(usage_row(20_000, ts=t - 120), edit_row(path, ts=t - 60),
                    usage_row(190_000, ts=t + 60), usage_row(200_000, ts=time.time() - 2 * 3600))
-        out = self.guard()
-        self.assertIn("send /handoff", out)
-        self.assertNotIn(path, out)
+        self.assertEqual(self.guard(), "")
 
-    def test_written_but_stale_on_disk_suggests_handoff_command(self):
+    def test_written_but_stale_on_disk_goes_through(self):
         # written after the nudge, but the file on disk predates it (reverted):
         # the mtime check must still bite even though the write check passes
         t = self.nudged()
         path = self.handoff(mtime=t - 60)
         self.after_nudge(t, edit_row(path, ts=time.time() - 2 * 3600))
-        out = self.guard()
-        self.assertIn("send /handoff", out)
-        self.assertNotIn(path, out)
+        self.assertEqual(self.guard(), "")
 
     def test_bash_write_to_tilde_path_counts(self):
         # never create files under the real home: unit-test _wrote directly
@@ -366,7 +388,7 @@ class Gap(Base):
         missing = os.path.join(self.dir, "gone.jsonl")
         self.assertFalse(cl._wrote(missing, os.path.join(self.dir, "HANDOFF.md"), 0))
 
-    def test_stale_handoff_suggests_handoff_command(self):
+    def test_stale_handoff_goes_through(self):
         path = os.path.join(self.dir, "HANDOFF.md")
         os.environ["CONTEXT_LINE_HANDOFF"] = path
         self.idle()
@@ -374,31 +396,35 @@ class Gap(Base):
         nudged_at = self.state()["sessions"]["s1"]["nudged_at"]
         open(path, "w").close()
         os.utime(path, (nudged_at - 60, nudged_at - 60))   # handoff predates the nudge
-        out = self.guard()
-        self.assertIn("send /handoff", out)
-        self.assertNotIn(path, out)
+        self.assertEqual(self.guard(), "")
         # never nudged at all: same existing file, but nothing to compare it against
-        out2 = cl.resume_guard("s2", self.transcript, self.dir)
-        self.assertIn("send /handoff", out2)
-        self.assertNotIn(path, out2)
+        self.assertEqual(cl.resume_guard("s2", self.transcript, self.dir), "")
 
-    def test_reason_suggests_handoff_when_none_exists(self):
+    def test_no_handoff_goes_through(self):
+        # /handoff into the cold session re-sends it all anyway: blocking saves nothing
         self.idle()
-        self.assertIn("send /handoff", self.guard())
+        self.assertEqual(self.guard(), "")
+        self.assertFalse(os.path.exists(self.state_file()))
+
+    def test_handoff_goes_through_on_the_first_try(self):
+        for prompt in ("/handoff", " /context-line:handoff next job"):
+            self.handed_off()
+            self.assertEqual(self.guard(prompt=prompt), "")
+        self.assertIn("not sent", self.guard(prompt="go on"))
 
     def test_reason_error_does_not_store_the_block(self):
         # if building the reason fails, nothing should be spent on this gap
-        self.idle()
+        self.handed_off()
         with mock.patch.object(cl, "gap_reason", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 self.guard()
-        self.assertFalse(os.path.exists(self.state_file()))
+        self.assertNotIn("gap_blocked", self.state()["sessions"]["s1"])
         nudges = os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")
         self.assertFalse(os.path.exists(nudges))
 
     def test_prompt_echoed_but_never_stored(self):
         prompt = "secret plan " + "x" * 400
-        self.idle()
+        self.handed_off()
         out = self.guard(prompt=prompt)
         self.assertTrue(out.endswith(prompt[:300]))
         self.assertNotIn(prompt[:301], out)
@@ -537,6 +563,80 @@ class Concurrency(Base):
         self.assertEqual(self.nudges_logged(), 1)
 
 
+class StuckLock(Base):
+    @unittest.skipUnless(cl.fcntl, "no flock here")
+    def test_stuck_lock_holder_fails_open(self):
+        # a hook stalled while holding the lock must not stall every tool call
+        import fcntl
+        self.at(160_000)
+        os.makedirs(os.environ["CLAUDE_PLUGIN_DATA"])
+        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
+                              "hook_event_name": "PostToolUse"})
+        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.lock"), "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            t = time.time()
+            r = subprocess.run([sys.executable, HOOK], input=payload, text=True,
+                               capture_output=True, timeout=5)
+            self.assertLess(time.time() - t, 3)
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+        r = subprocess.run([sys.executable, HOOK], input=payload, text=True,
+                           capture_output=True, timeout=5)
+        self.assertIn("START A FRESH SESSION", r.stdout)   # nothing was lost
+
+
+class HookCommand(Base):
+    """hooks.json: a missing or stub python3 must not be a hook error on every call."""
+
+    def hooks(self):
+        with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
+            return [h for groups in json.load(f)["hooks"].values()
+                    for g in groups for h in g["hooks"]]
+
+    def test_every_hook_has_a_short_timeout(self):
+        self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5])
+
+    def run_command(self, pythons):
+        """Run the hooks.json command with only `pythons` ({name: target}) on PATH."""
+        import shutil
+        bin_ = os.path.join(self.dir, "bin")
+        os.makedirs(bin_)
+        os.symlink(shutil.which("cat"), os.path.join(bin_, "cat"))
+        for name, target in pythons.items():
+            os.symlink(target, os.path.join(bin_, name))
+        self.at(160_000)
+        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
+                              "hook_event_name": "UserPromptSubmit", "prompt": "hi"})
+        env = dict(os.environ, PATH=bin_, CLAUDE_PLUGIN_ROOT=ROOT)
+        cmd = self.hooks()[0]["command"]
+        return subprocess.run([shutil.which("bash"), "-c", cmd], input=payload, text=True,
+                              capture_output=True, env=env, timeout=10)
+
+    def stub(self):
+        """A python3 like the Windows store alias or the CLT-less macOS stub."""
+        path = os.path.join(self.dir, "stub")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\necho 'Python was not found'; echo 'Python was not found' >&2; exit 49\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_no_python_is_silent(self):
+        r = self.run_command({})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def test_stub_python3_is_silent(self):
+        r = self.run_command({"python3": self.stub()})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def test_stub_python3_falls_back_to_python(self):
+        r = self.run_command({"python3": self.stub(), "python": sys.executable})
+        self.assertEqual(r.returncode, 0)
+        self.assertTrue(r.stdout.startswith("context-line: START A FRESH SESSION"))
+
+    def test_real_python3_runs(self):
+        r = self.run_command({"python3": sys.executable})
+        self.assertIn("START A FRESH SESSION", r.stdout)
+
+
 class NeverBlocks(Base):
     def run_hook(self, stdin):
         env = dict(os.environ, PATH="/usr/bin:/bin")   # hooks don't get your PATH
@@ -549,7 +649,7 @@ class NeverBlocks(Base):
                      "hook_event_name": "UserPromptSubmit", "prompt": "hi"}, **extra)
 
     def test_idle_prompt_prints_block_json(self):
-        self.idle()
+        self.handed_off("abc123")
         r = self.run_hook(json.dumps(self.prompt_payload()))
         self.assertEqual(r.returncode, 0)
         out = json.loads(r.stdout)
@@ -564,9 +664,7 @@ class NeverBlocks(Base):
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
 
     def test_held_back_prompt_does_not_count_toward_grading(self):
-        self.write(usage_row(20_000, ts=time.time() - 60), usage_row(200_000, ts=time.time()))
-        self.assertTrue(cl.check("abc123", self.transcript))   # nudged
-        self.idle()                                            # then it sat for 2h
+        self.handed_off("abc123")   # nudged, wrote its handoff, then sat for 2h
         r = self.run_hook(json.dumps(self.prompt_payload()))
         self.assertEqual(json.loads(r.stdout)["decision"], "block")
         self.assertEqual(self.state()["sessions"]["abc123"]["prompts_since_nudge"], 0)
@@ -583,7 +681,7 @@ class NeverBlocks(Base):
     @unittest.skipUnless(os.path.exists("/usr/bin/python3"), "no system python here")
     def test_system_python_parses_timestamps(self):
         # hooks get the system python (3.9 on macOS); its fromisoformat rejects a trailing Z
-        self.idle()
+        self.handed_off("abc123")
         env = dict(os.environ, PATH="/usr/bin:/bin")
         r = subprocess.run(["/usr/bin/python3", HOOK], input=json.dumps(self.prompt_payload()),
                            text=True, capture_output=True, env=env, timeout=10)
