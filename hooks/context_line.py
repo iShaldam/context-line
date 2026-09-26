@@ -150,7 +150,7 @@ def _grade(s, cfg, sid, r, outcome):
     """Once per session, so one stubborn session moves the line one STEP."""
     r["graded"] = outcome
     if outcome == "ignored" and cfg["adapt"]:
-        s["line"] = max(cfg["floor"], s["line"] - STEP)
+        s["line"] = max(min(cfg["floor"], s["line"]), s["line"] - STEP)
     _log({"ts": time.time(), "session": sid, "outcome": outcome,
           "ctx": r.get("nudge_ctx"), "line_now": s["line"]})
 

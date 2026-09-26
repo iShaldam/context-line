@@ -18,7 +18,8 @@ plant() {  # name, sed expression
   rm -rf "$tmp"
 }
 plant "line comparison flipped" 's/ctx >= s\["line"\]/ctx < s["line"]/'
-plant "floor ignored"           's/max(cfg\["floor"\], s\["line"\] - STEP)/s["line"] - STEP/'
+plant "floor ignored"           's/max(min(cfg\["floor"\], s\["line"\]), s\["line"\] - STEP)/s["line"] - STEP/'
+plant "low line pushed to floor" 's/max(min(cfg\["floor"\], s\["line"\]), /max(cfg["floor"], /'
 plant "adapt flag ignored"      's/ and cfg\["adapt"\]:/:/'
 plant "renudge gap dropped"     's/ctx >= last + RENUDGE/True/'
 plant "errors escape main"      's/        pass   # silence/        raise/'

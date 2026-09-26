@@ -158,6 +158,11 @@ class Learning(Base):
         self.ignore_one("s2")
         self.assertEqual(self.state()["line"], 80_000)
 
+    def test_line_set_below_floor_is_never_raised(self):
+        os.environ["CONTEXT_LINE_LINE"] = "60000"
+        self.ignore_one("s1")
+        self.assertEqual(self.state()["line"], 60_000)
+
     def test_adapt_off_keeps_line(self):
         os.environ["CONTEXT_LINE_ADAPT"] = "0"
         self.ignore_one("s1")
