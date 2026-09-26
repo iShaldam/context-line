@@ -60,7 +60,8 @@ off everywhere.
 /plugin install context-line@context-line
 ```
 
-Needs `python3` on the system (stdlib only, no packages).
+Needs Python 3 on the system as `python3`, `py -3` or `python` (stdlib only,
+no packages). Without one the hooks stay silent instead of erroring.
 
 ## settings
 
