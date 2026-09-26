@@ -17,8 +17,8 @@ and every nudge after the first in a session is firmer. So does context that
 keeps growing after a nudge: that's the model talking past it.
 
 One prompt can be held back on purpose: the first one into a heavy session
-that sat idle past the prompt cache, which would re-send everything. Sending
-it again goes through. Otherwise stdlib only, and any failure means silence:
+that sat idle past the prompt cache, which would re-send everything, once
+that session has already written its handoff. Sending it again goes through. Otherwise stdlib only, and any failure means silence:
 an error must never block a prompt.
 """
 import datetime, json, os, sys, time
@@ -322,25 +322,15 @@ def _wrote(transcript, path, since):
     return False
 
 
-def gap_reason(ctx, gap, path, prompt="", since=None):
-    """What the held-back prompt would cost. Shown to the user, never the model.
-
-    The handoff (path, or None when this session didn't write it) is named
-    only if it was written at or after this session's last nudge (since); a
-    repo's handoff is shared and may predate this session, so following a
-    stale one could lose this session's own work. Otherwise the text
-    suggests /handoff.
-    """
+def gap_reason(ctx, gap, path, prompt=""):
+    """What the held-back prompt would cost, pointing at this session's own
+    handoff at path. Shown to the user, never the model."""
     k = ctx // 1000
-    if (path and since is not None and os.path.exists(path)
-            and os.path.getmtime(path) >= since):
-        cheaper = (f"start a new session and read {path} "
-                   f"(updated {_ago(time.time() - os.path.getmtime(path))} ago)")
-    else:
-        cheaper = "send /handoff once to wrap up here, then start a new session from it"
     out = (f"context-line: not sent. This session carries ~{k}k and sat idle {_ago(gap)}, "
            f"past the prompt cache, so this prompt would re-send all {k}k. Cheaper: "
-           f"{cheaper}. To go on here, send it again.")
+           f"start a new session and read {path} "
+           f"(updated {_ago(time.time() - os.path.getmtime(path))} ago). "
+           "To go on here, send it again.")
     if prompt:   # the app may drop a blocked prompt; shown to the user, never stored
         out += "\n\nYour prompt, to copy back:\n" + prompt[:300]
     return out
@@ -350,9 +340,10 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     """The reason to hold this prompt back, or '' to let it through.
 
     A session idle past the prompt cache re-sends all of its context on the
-    next prompt. When that session is over the line, hold the first prompt
-    back once and say what it would cost; the same prompt sent again goes
-    through (no API call has happened since, so the last call's time matches).
+    next prompt. When that session is over the line and has written its
+    handoff, hold the first prompt back once and say what it would cost; the
+    same prompt sent again goes through (no API call has happened since, so
+    the last call's time matches).
     """
     if not session_id or not transcript or settings()["gap"] <= 0:
         return ""
@@ -388,9 +379,14 @@ def _resume_guard(session_id, transcript, cwd, prompt):
             r["gap_resent"] = when
         _save(s)
         return ""
+    # only a handoff this session wrote since its nudge makes holding back pay:
+    # without one, /handoff here re-sends it all anyway. A repo's handoff is
+    # shared and may predate this session, so its mtime alone can't say.
     since, path = r.get("nudged_at"), handoff_path(cwd, session_id)
-    mine = path if _wrote(transcript, path, since) else None
-    reason = gap_reason(ctx, gap, mine, prompt, since=since)
+    if not (_wrote(transcript, path, since) and os.path.exists(path)
+            and os.path.getmtime(path) >= since):
+        return ""
+    reason = gap_reason(ctx, gap, path, prompt)
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
     _save(s)
