@@ -10,20 +10,25 @@ tokens on every single prompt, and a compacted one has already lost detail.
 
 ## what it does
 
-Before each prompt, a hook reads how much context the last turn carried.
-Past the line (150k by default), or right after a compaction, the model is
-asked to:
+Before each prompt, and after each tool call so a long agentic turn can't
+run past it, a hook reads how much context the last turn carried. Past the
+line (150k by default), or right after a compaction, the model is asked to:
 
-1. finish or pause the current step,
+1. stop at the next safe point — no new task, no browsing, builds or test runs,
 2. add a dated section to a handoff file — what's done, what's next, what
    was decided,
 3. give you one fenced block to paste into a new session.
+
+Only growth counts: a fresh session already carries its tools, skills and
+connectors (often 100k+), so there's no nudge until the session has grown at
+least 40k past its first turn. A fresh one would be just as big.
 
 The handoff goes to `HANDOFF.md` at the root of the current git repo, or to
 the plugin's state folder when you're not in one.
 
 It learns. If you act on a nudge, fine. If you talk past it (more than two
-prompts), the line drops 10k for next time, down to a floor of 80k. The
+prompts), or the model keeps working (20k more context), the line drops 10k
+for next time (once per session at most), down to a floor of 80k. The
 point is to catch you earlier, not to give up. Repeat nudges in the same
 session get firmer.
 
@@ -46,6 +51,7 @@ Environment variables, all optional:
 |---|---|---|
 | `CONTEXT_LINE_LINE` | `150000` | tokens of context that trigger a nudge |
 | `CONTEXT_LINE_FLOOR` | `80000` | the learned line never drops below this |
+| `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
 | `CONTEXT_LINE_ADAPT` | `1` | `0` keeps the line fixed |
 | `CONTEXT_LINE_HANDOFF` | — | always write the handoff to this file |
 
@@ -61,7 +67,7 @@ after a week.
 ## never blocks
 
 Any error — an unreadable transcript, a full disk, a format change — means
-the hook prints nothing and your prompt goes through untouched.
+the hook prints nothing and your prompt or tool call goes through untouched.
 
 ## development
 
