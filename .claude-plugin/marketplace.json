@@ -1,0 +1,16 @@
+{
+  "name": "context-line",
+  "owner": {
+    "name": "iShaldam"
+  },
+  "metadata": {
+    "description": "context-line: start fresh sessions before context gets expensive"
+  },
+  "plugins": [
+    {
+      "name": "context-line",
+      "source": "./",
+      "description": "Nudges you to start a fresh session once context gets heavy, and hands you a copy-ready handoff prompt"
+    }
+  ]
+}
