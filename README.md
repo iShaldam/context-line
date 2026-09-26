@@ -34,6 +34,17 @@ session get firmer.
 
 `/handoff` does the same wrap-up on demand, whenever you want it.
 
+In the Claude desktop app the paste block ends with one more line naming
+the old session, and the new session renames it to `done: <title>`, so the
+sidebar shows what's finished. Nothing gets archived or deleted: archived
+sessions drop out of transcript search. Outside the desktop app there's no
+session tool, so the line is left out.
+
+The prompt cache lasts about an hour. Come back to a heavy session after
+that and your next prompt re-sends the whole thing, so the first prompt
+after an hour idle is held back once, with the cost and the handoff spelled
+out. Send it again to go on. It only fires on sessions already over the line.
+
 ## install
 
 ```
@@ -54,20 +65,26 @@ Environment variables, all optional:
 | `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
 | `CONTEXT_LINE_ADAPT` | `1` | `0` keeps the line fixed |
 | `CONTEXT_LINE_HANDOFF` | — | always write the handoff to this file |
+| `CONTEXT_LINE_GAP` | `3600` | seconds idle before the resume guard holds a prompt back; `0` turns it off |
 
 On a 1M-context model you may want a higher line; on a tight plan, a lower one.
+
+With the API's 5-minute prompt cache, set `CONTEXT_LINE_GAP=300`.
 
 ## privacy
 
 Everything stays on your machine. The state file and `nudges.jsonl` log hold
-session ids, token counts and timestamps — never prompt text. State lives in
+session ids, token counts and timestamps — never prompt text. When the resume guard holds a prompt back it shows you its first 300
+characters so you can copy them back; that text isn't stored. State lives in
 the plugin data folder (or `~/.local/state/context-line/`) and prunes itself
 after a week.
 
-## never blocks
+## blocks only on purpose
 
-Any error — an unreadable transcript, a full disk, a format change — means
-the hook prints nothing and your prompt or tool call goes through untouched.
+Errors never block: an unreadable transcript, a full disk or a format
+change means the hook prints nothing and your prompt or tool call goes
+through untouched. The one deliberate block is the resume guard, once per
+idle gap; sending again always goes through. `CONTEXT_LINE_GAP=0` turns it off.
 
 ## development
 

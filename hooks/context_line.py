@@ -16,7 +16,10 @@ the line for next time -- the point is to catch it earlier, not to give up --
 and every nudge after the first in a session is firmer. So does context that
 keeps growing after a nudge: that's the model talking past it.
 
-Stdlib only. Any failure means silence: this hook must never block a prompt.
+One prompt can be held back on purpose: the first one into a heavy session
+that sat idle past the prompt cache, which would re-send everything. Sending
+it again goes through. Otherwise stdlib only, and any failure means silence:
+an error must never block a prompt.
 """
 import datetime, json, os, sys, time
 try:
