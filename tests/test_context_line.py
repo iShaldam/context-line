@@ -278,6 +278,16 @@ class Gap(Base):
         self.idle()
         self.assertIn("send /handoff", self.guard())
 
+    def test_reason_error_does_not_store_the_block(self):
+        # if building the reason fails, nothing should be spent on this gap
+        self.idle()
+        with mock.patch.object(cl, "gap_reason", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.guard()
+        self.assertFalse(os.path.exists(self.state_file()))
+        nudges = os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")
+        self.assertFalse(os.path.exists(nudges))
+
     def test_prompt_echoed_but_never_stored(self):
         prompt = "secret plan " + "x" * 400
         self.idle()

@@ -350,10 +350,11 @@ def _resume_guard(session_id, transcript, cwd, prompt):
         _log(dict(row, event="gap_resent"))
         _save(s)
         return ""
+    reason = gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt, since=r.get("nudged_at"))
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
     _save(s)
-    return gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt, since=r.get("nudged_at"))
+    return reason
 
 
 def main():
