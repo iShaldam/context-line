@@ -336,6 +336,13 @@ def gap_reason(ctx, gap, path, prompt=""):
     return out
 
 
+def _headless():
+    """claude -p, the SDK, scheduled jobs: nobody is there to send it again.
+    CLAUDE_CODE_SESSION_ATTENDED is undocumented, so it's only a hint."""
+    return (os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")
+            or os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0")
+
+
 def resume_guard(session_id, transcript, cwd="", prompt=""):
     """The reason to hold this prompt back, or '' to let it through.
 
@@ -345,7 +352,7 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     same prompt sent again goes through (no API call has happened since, so
     the last call's time matches).
     """
-    if not session_id or not transcript or settings()["gap"] <= 0:
+    if _headless() or not session_id or not transcript or settings()["gap"] <= 0:
         return ""
     os.makedirs(state_dir(), exist_ok=True)
     with open(os.path.join(state_dir(), "state.lock"), "w") as lock:

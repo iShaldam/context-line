@@ -49,8 +49,9 @@ out. Send it again to go on. It only fires on sessions already over the line
 that have written their handoff: without one, `/handoff` would re-send it all
 anyway, so the prompt just goes through.
 Scripts and agents that resume heavy sessions (`claude -p --resume`, the
-SDK, scheduled jobs) have nobody to send it again, so run them with
-`CONTEXT_LINE_GAP=0`.
+SDK, scheduled jobs) have nobody to send it again, so the guard skips them
+(`CLAUDE_CODE_ENTRYPOINT` starting with `sdk`). `CONTEXT_LINE_GAP=0` turns it
+off everywhere.
 
 ## install
 
