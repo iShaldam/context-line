@@ -1,5 +1,5 @@
 """Synthetic transcripts only -- nothing here comes from a real session."""
-import json, os, subprocess, sys, tempfile, time, unittest
+import datetime, json, os, subprocess, sys, tempfile, time, unittest
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -8,10 +8,19 @@ sys.path.insert(0, os.path.join(ROOT, "hooks"))
 import context_line as cl  # noqa: E402
 
 
-def usage_row(ctx):
-    return {"type": "assistant", "message": {"usage": {
+def usage_row(ctx, ts=None):
+    row = {"type": "assistant", "message": {"usage": {
         "input_tokens": 10, "cache_read_input_tokens": ctx - 10,
         "cache_creation_input_tokens": 0}}}
+    if ts is not None:
+        row["timestamp"] = iso(ts)
+    return row
+
+
+def iso(t):
+    """A transcript timestamp: UTC, milliseconds, trailing Z."""
+    d = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
+    return d.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 class Base(unittest.TestCase):
@@ -38,6 +47,11 @@ class Base(unittest.TestCase):
     def at(self, ctx, base=20_000):
         """A session that started at `base` tokens and now carries `ctx`."""
         self.write(usage_row(base), usage_row(ctx))
+
+    def idle(self, ctx=200_000, base=20_000, secs=2 * 3600):
+        """A session whose last API call was `secs` ago."""
+        now = time.time()
+        self.write(usage_row(base, ts=now - secs - 60), usage_row(ctx, ts=now - secs))
 
     def state_file(self):
         return os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.json")
@@ -111,6 +125,30 @@ class Baseline(Base):
         os.environ["CONTEXT_LINE_MIN_GROWTH"] = "0"
         self.write(usage_row(1_000))
         self.assertTrue(cl.check("s1", self.transcript))
+
+
+class Timestamps(Base):
+    def test_context_of_returns_last_call_time(self):
+        # the new prompt is already written when the hook runs: fresh stamp, no usage
+        t = time.time() - 7200
+        self.write(usage_row(20_000, ts=t - 60), usage_row(150_000, ts=t),
+                   {"type": "user", "timestamp": iso(time.time())})
+        ctx, compacted, when = cl.context_of(self.transcript)
+        self.assertEqual((ctx, compacted), (150_000, False))
+        self.assertAlmostEqual(when, t, places=2)
+
+    def test_no_timestamp_is_none(self):
+        self.at(150_000)
+        self.assertIsNone(cl.context_of(self.transcript)[2])
+
+    def test_bad_timestamp_is_none(self):
+        row = usage_row(150_000)
+        row["timestamp"] = "yesterday"
+        self.write(row)
+        self.assertIsNone(cl.context_of(self.transcript)[2])
+
+    def test_missing_transcript_has_no_time(self):
+        self.assertEqual(cl.context_of(os.path.join(self.dir, "nope.jsonl")), (0, False, None))
 
 
 class MidTurn(Base):

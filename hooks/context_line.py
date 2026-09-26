@@ -113,6 +113,19 @@ def _usage(line):
         return 0
 
 
+def _when(line):
+    """Epoch seconds of a transcript row's timestamp, or None.
+
+    Hooks get the system python (3.9 on macOS), whose fromisoformat rejects a
+    trailing Z -- without the swap every timestamp fails to parse.
+    """
+    try:
+        ts = json.loads(line).get("timestamp")
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 def baseline_of(transcript):
     """Context the session started with: its first usage row, read from the head."""
     try:
@@ -129,21 +142,28 @@ def baseline_of(transcript):
 
 
 def context_of(transcript):
-    """(context tokens carried by the last turn, whether it was compacted)."""
-    ctx, compacted = 0, False
+    """(context tokens carried by the last turn, whether it was compacted,
+    epoch time of that last API call or None).
+
+    The time comes from the last row that carries usage, not the last row:
+    by the time a prompt hook runs, the new prompt may already be written.
+    """
+    ctx, compacted, when = 0, False, None
     try:
         with open(transcript, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - TAIL))
             lines = f.read().decode("utf-8", "ignore").splitlines()
     except OSError:
-        return 0, False
+        return 0, False, None
     for line in reversed(lines):
         if '"isCompactSummary":true' in line.replace(" ", ""):
             compacted = True
         if not ctx:
             ctx = _usage(line)
-    return ctx, compacted
+            if ctx:
+                when = _when(line)
+    return ctx, compacted, when
 
 
 def _grade(s, cfg, sid, r, outcome):
@@ -197,6 +217,11 @@ def message(ctx, compacted, n, path):
             f"'read {path} first', and the first next step. (3) {RENAME_STEP}")
 
 
+def _heavy(ctx, base, s, cfg):
+    """Over the line, counting only growth past the session's first turn."""
+    return ctx >= s["line"] and ctx - base >= cfg["min_growth"]
+
+
 def check(session_id, transcript, cwd="", event="prompt"):
     """Return an instruction for the model, or '' when the session is fine.
 
@@ -223,7 +248,7 @@ def _check(session_id, transcript, cwd, event):
         r["prompts_since_nudge"] = r.get("prompts_since_nudge", 0) + 1
     changed = _settle(s, cfg) or prompt
 
-    ctx, compacted = context_of(transcript)
+    ctx, compacted, _ = context_of(transcript)
     base = r.get("baseline") or baseline_of(transcript)
     if base:
         r["baseline"] = base
@@ -232,8 +257,7 @@ def _check(session_id, transcript, cwd, event):
         _grade(s, cfg, session_id, r, "ignored")   # the session talked past it
         changed = True
     due = (compacted and not r.get("nudged_compact")) or (
-        ctx >= s["line"] and ctx - base >= cfg["min_growth"]
-        and (last is None or ctx >= last + RENUDGE))
+        _heavy(ctx, base, s, cfg) and (last is None or ctx >= last + RENUDGE))
     if not due:
         if changed:
             _save(s)
