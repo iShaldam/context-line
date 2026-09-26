@@ -207,6 +207,34 @@ class HandoffPath(Base):
         self.assertEqual(cl.handoff_path(self.dir, "x"), os.path.join(self.dir, "mine.md"))
 
 
+class Concurrency(Base):
+    def nudges_logged(self):
+        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")) as f:
+            return sum(json.loads(l).get("event") == "nudge" for l in f)
+
+    def test_parallel_tool_calls_nudge_once(self):
+        # parallel tool calls fire their PostToolUse hooks at the same moment
+        self.at(160_000)
+        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
+                              "hook_event_name": "PostToolUse"})
+        real, other = cl.context_of, []
+
+        def racing(transcript):   # a second hook runs while this one is mid-check
+            if not other:
+                p = subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE,
+                                     stdout=subprocess.DEVNULL, text=True)
+                p.stdin.write(payload)
+                p.stdin.close()
+                other.append(p)
+                time.sleep(0.5)
+            return real(transcript)
+
+        with mock.patch.object(cl, "context_of", racing):
+            cl.check("s1", self.transcript, event="tool")
+        other[0].wait(timeout=10)
+        self.assertEqual(self.nudges_logged(), 1)
+
+
 class NeverBlocks(Base):
     def run_hook(self, stdin):
         env = dict(os.environ, PATH="/usr/bin:/bin")   # hooks don't get your PATH

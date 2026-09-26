@@ -32,4 +32,5 @@ plant "graded every nudge"      's/prompts_since_nudge=0)$/prompts_since_nudge=0
 plant "quiet tools save state"  's/        if changed:$/        if True:/'
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "tool nudge as plain text" 's/if out and tool:/if False:/'
+plant "no lock on state"        's/            fcntl.flock(lock, fcntl.LOCK_EX)/            pass/'
 exit $missed

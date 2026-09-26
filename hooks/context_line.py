@@ -19,6 +19,10 @@ keeps growing after a nudge: that's the model talking past it.
 Stdlib only. Any failure means silence: this hook must never block a prompt.
 """
 import datetime, json, os, sys, time
+try:
+    import fcntl
+except ImportError:   # windows: no lock, parallel tool calls may double-nudge
+    fcntl = None
 
 STEP = 10000         # how far one ignored nudge moves the line
 RENUDGE = 30000      # context growth before nudging the same session again
@@ -190,6 +194,14 @@ def check(session_id, transcript, cwd="", event="prompt"):
     """
     if not session_id or not transcript:
         return ""
+    os.makedirs(state_dir(), exist_ok=True)
+    with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
+        if fcntl:   # parallel tool calls fire their hooks at the same moment
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        return _check(session_id, transcript, cwd, event)
+
+
+def _check(session_id, transcript, cwd, event):
     cfg = settings()
     s = _load(cfg)
     r = s["sessions"].setdefault(session_id, {})
