@@ -20,5 +20,5 @@ Wrap this session up so a fresh one can pick it up with nothing lost.
 5. If a tool can tell you this session's own id and title (in the Claude
    desktop app: `get_session` with `"self"`), add one last line to that
    block, outside the 80 words:
-   `first: rename session <id> to "done: <title>" (skip if it already starts with "done: "; don't archive it; if the rename fails, say so and carry on)`
+   `first: rename session <id> to "handed off: <title>" if get_session <id> shows its postTurnSummary status_category is not "completed" (blocked or open), otherwise to "done: <title>" (skip if it already starts with "done: " or "handed off: "; don't archive it; if the rename fails, say so and carry on)`
    Outside the desktop app there is no such tool; leave the line out.

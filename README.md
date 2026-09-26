@@ -36,7 +36,9 @@ session get firmer.
 
 In the Claude desktop app the paste block ends with one more line naming
 the old session, and the new session renames it to `done: <title>`, so the
-sidebar shows what's finished. Nothing gets archived or deleted: archived
+sidebar shows what's finished. If the old session's last turn didn't complete
+(blocked, or a question left open) it gets `handed off: <title>` instead, so
+nobody mistakes an unfinished job for a done one. Nothing gets archived or deleted: archived
 sessions drop out of transcript search. Outside the desktop app there's no
 session tool, so the line is left out.
 

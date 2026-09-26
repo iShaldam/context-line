@@ -462,8 +462,9 @@ class Learning(Base):
 
 
 class DoneLabel(Base):
-    """The old session names itself in the paste block; the new one labels it done."""
-    LINE = 'first: rename session <id> to "done: <title>"'
+    """The old session names itself in the paste block; the new one labels it
+    done:, or handed off: when its last turn didn't complete (blocked, open)."""
+    LINE = 'first: rename session <id> to "handed off: <title>" if'
 
     def test_nudge_asks_for_the_rename_line(self):
         self.at(150_000)
@@ -471,6 +472,13 @@ class DoneLabel(Base):
         self.assertIn(self.LINE, out)
         self.assertIn('get_session with "self"', out)
         self.assertIn("don't archive it", out)
+
+    def test_rename_line_picks_the_label_from_the_last_turn_status(self):
+        self.at(150_000)
+        out = cl.check("s1", self.transcript)
+        self.assertIn('postTurnSummary status_category is not "completed"', out)
+        self.assertIn('otherwise to "done: <title>"', out)
+        self.assertIn('starts with "done: " or "handed off: "', out)
 
     def test_compaction_nudge_asks_too(self):
         self.write({"isCompactSummary": True}, usage_row(20_000))
