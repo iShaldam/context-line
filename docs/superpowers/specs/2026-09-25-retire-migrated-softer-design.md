@@ -120,6 +120,9 @@ anything, `/handoff` included. A later gap after new turns blocks again.
 > send it again.
 
 If no handoff file exists yet, the text instead suggests sending `/handoff`.
+The handoff is named only if it was written at or after this session's last
+nudge; otherwise the text suggests `/handoff` too, since a repo's handoff
+is shared and may predate this session.
 If B0.2 found the text is lost, the reason ends with the first 300
 characters of the prompt so it can be copied. Nothing is logged.
 

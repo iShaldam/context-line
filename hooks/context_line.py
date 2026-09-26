@@ -290,10 +290,16 @@ def _ago(secs):
     return f"{secs}s"
 
 
-def gap_reason(ctx, gap, path, prompt=""):
-    """What the held-back prompt would cost. Shown to the user, never the model."""
+def gap_reason(ctx, gap, path, prompt="", since=None):
+    """What the held-back prompt would cost. Shown to the user, never the model.
+
+    The handoff is named only if it was written at or after this session's
+    last nudge (since); a repo's handoff is shared and may predate this
+    session, so following a stale one could lose this session's own work.
+    Otherwise the text suggests /handoff.
+    """
     k = ctx // 1000
-    if os.path.exists(path):
+    if since is not None and os.path.exists(path) and os.path.getmtime(path) >= since:
         cheaper = (f"start a new session and read {path} "
                    f"(updated {_ago(time.time() - os.path.getmtime(path))} ago)")
     else:
@@ -347,7 +353,7 @@ def _resume_guard(session_id, transcript, cwd, prompt):
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
     _save(s)
-    return gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt)
+    return gap_reason(ctx, gap, handoff_path(cwd, session_id), prompt, since=r.get("nudged_at"))
 
 
 def main():

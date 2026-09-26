@@ -247,12 +247,32 @@ class Gap(Base):
     def test_reason_points_at_existing_handoff(self):
         path = os.path.join(self.dir, "HANDOFF.md")
         os.environ["CONTEXT_LINE_HANDOFF"] = path
-        open(path, "w").close()
         self.idle()
+        cl.check("s1", self.transcript)   # nudges: sets nudged_at
+        s = self.state()
+        s["sessions"]["s1"]["nudged_at"] -= 60   # avoid mtime-granularity flakiness
+        cl._save(s)
+        open(path, "w").close()
         out = self.guard()
         self.assertIn(path, out)
         self.assertIn("updated", out)
         self.assertNotIn("send /handoff", out)
+
+    def test_stale_handoff_suggests_handoff_command(self):
+        path = os.path.join(self.dir, "HANDOFF.md")
+        os.environ["CONTEXT_LINE_HANDOFF"] = path
+        self.idle()
+        cl.check("s1", self.transcript)   # nudges: sets nudged_at
+        nudged_at = self.state()["sessions"]["s1"]["nudged_at"]
+        open(path, "w").close()
+        os.utime(path, (nudged_at - 60, nudged_at - 60))   # handoff predates the nudge
+        out = self.guard()
+        self.assertIn("send /handoff", out)
+        self.assertNotIn(path, out)
+        # never nudged at all: same existing file, but nothing to compare it against
+        out2 = cl.resume_guard("s2", self.transcript, self.dir)
+        self.assertIn("send /handoff", out2)
+        self.assertNotIn(path, out2)
 
     def test_reason_suggests_handoff_when_none_exists(self):
         self.idle()
