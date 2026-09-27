@@ -44,7 +44,8 @@ Come back to a heavy session after that and your next prompt re-sends the
 whole thing, so the first prompt after the cache has expired is held back
 once, with the cost and the handoff spelled out. Send it again to go on. It only fires on sessions already over the line
 that have written their handoff: without one, `/handoff` would re-send it all
-anyway, so the prompt just goes through.
+anyway, so the prompt just goes through. So does a prompt queued while a
+turn is still running a tool: that isn't a resume.
 Scripts and agents that resume heavy sessions (`claude -p --resume`, the
 SDK, scheduled jobs) have nobody to send it again, so the guard skips them
 (`CLAUDE_CODE_ENTRYPOINT` starting with `sdk`). `CONTEXT_LINE_GAP=0` turns it
@@ -59,6 +60,9 @@ off everywhere.
 
 Needs Python 3 on the system as `python3`, `py -3` or `python` (stdlib only,
 no packages). Without one the hooks stay silent instead of erroring.
+The mid-turn check uses the `PostToolBatch` hook event, tested on Claude
+Code 2.1.197; the changelog doesn't say which release added it, so on an
+older one update first.
 
 ## settings
 
@@ -80,7 +84,8 @@ and the `nudges.jsonl` log hold session ids, token counts and timestamps —
 never prompt text. When the resume guard holds a prompt back it shows you its
 first 300 characters so you can copy them back; that text isn't stored. It all
 lives in the plugin data folder (or `~/.local/state/context-line/`); deleting
-it only resets the nudge counts.
+it only resets the nudge counts. Older versions kept one `state.json` plus
+`state.lock` there; nothing reads them now, so both can go.
 
 ## blocks only on purpose
 
