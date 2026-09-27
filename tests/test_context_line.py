@@ -598,6 +598,20 @@ class NeverBlocks(Base):
         r = self.run_hook(json.dumps(self.tool_payload()))
         self.assertEqual((r.returncode, r.stdout), (0, ""))   # no block, already nudged
 
+    def test_idle_post_tool_use_never_blocks(self):
+        self.handed_off("abc123")
+        r = self.run_hook(json.dumps(self.tool_payload(hook_event_name="PostToolUse")))
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    def test_idle_unknown_event_never_blocks(self):
+        # only a prompt can be held back; any other event, known or not, goes through
+        for event in ("SessionStart", "Stop", None):
+            self.handed_off("abc123")
+            payload = self.prompt_payload(hook_event_name=event)
+            r = self.run_hook(json.dumps(payload))
+            self.assertEqual(r.returncode, 0)
+            self.assertNotIn('"decision"', r.stdout, event)
+
     def test_broken_guard_still_nudges(self):
         self.at(160_000)
         out = io.StringIO()

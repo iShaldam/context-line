@@ -354,7 +354,7 @@ def main():
         tool = event in ("PostToolBatch", "PostToolUse")
         sid, transcript = p.get("session_id"), p.get("transcript_path")
         cwd = p.get("cwd") or ""
-        if not tool:
+        if event == "UserPromptSubmit":   # only a prompt can be held back
             try:
                 reason = resume_guard(sid, transcript, cwd, p.get("prompt") or "")
             except Exception:
