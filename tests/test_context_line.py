@@ -226,6 +226,26 @@ class Gap(Base):
         self.assertIsNone(cl.context_of(self.transcript)[2])
         self.assertEqual(self.guard(), "")
 
+    def last_turn(self, stop_reason):
+        """handed_off(), then one more call that stopped for `stop_reason`,
+        followed by a row without usage (a tool result, or the new prompt)."""
+        self.handed_off()
+        row = usage_row(200_000, ts=time.time() - 2 * 3600 + 1)
+        row["message"]["stop_reason"] = stop_reason
+        with open(self.transcript, "a") as f:
+            f.write(json.dumps(row) + "\n")
+            f.write(json.dumps({"type": "user", "message": {"content": "later"}}) + "\n")
+
+    def test_turn_in_flight_goes_through(self):
+        # a prompt queued mid-turn (a long build, say) isn't a resume: the
+        # tool call's result comes back before the next API call anyway
+        self.last_turn("tool_use")
+        self.assertEqual(self.guard(), "")
+
+    def test_finished_turn_is_still_held_back(self):
+        self.last_turn("end_turn")
+        self.assertIn("not sent", self.guard())
+
     def test_short_idle_goes_through(self):
         self.handed_off(secs=30 * 60)
         self.assertEqual(self.guard(), "")

@@ -163,6 +163,18 @@ def context_of(transcript):
     return ctx, compacted, when
 
 
+def in_flight(transcript):
+    """True while a turn is still running: its last API call stopped to run a
+    tool. A prompt queued then isn't a resume, however long the tool took."""
+    for line in reversed(_tail(transcript)):
+        if _usage(line):
+            try:
+                return json.loads(line)["message"].get("stop_reason") == "tool_use"
+            except (ValueError, KeyError, TypeError, AttributeError):
+                return False
+    return False
+
+
 def cache_ttl(transcript):
     """Seconds this session's prompt cache lasts, from its last cache write:
     an hour on a subscription within included usage, 5 minutes on an API key
@@ -312,7 +324,7 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     if when is None:
         return ""
     gap = time.time() - when
-    if gap < (cfg["gap"] or cache_ttl(transcript)):
+    if gap < (cfg["gap"] or cache_ttl(transcript)) or in_flight(transcript):
         return ""
     r = _load(session_id)
     base = r.get("baseline") or baseline_of(transcript)
