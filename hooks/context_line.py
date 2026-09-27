@@ -3,12 +3,13 @@
 
 Every turn re-sends the whole context, so a big session pays its size on
 every prompt. This hook runs on UserPromptSubmit and, so long agentic turns
-can't blow past the line, on PostToolUse too. It reads the transcript's last
-usage row and, once the session crosses a line (or gets compacted), asks the
-model to stop, write a handoff and give the user a paste-ready prompt for a
-new session. Only growth since the session's first turn counts: a fresh
-session already carries its tools and skills, and nagging on turn one helps
-no one. Every nudge after the first in a session is firmer.
+can't blow past the line, after each batch of tool calls (PostToolBatch). It
+reads the transcript's last usage row and, once the session crosses a line
+(or gets compacted), asks the model to stop, write a handoff and give the
+user a paste-ready prompt for a new session. Only growth since the session's
+first turn counts: a fresh session already carries its tools and skills, and
+nagging on turn one helps no one. Every nudge after the first in a session
+is firmer.
 
 One prompt can be held back on purpose: the first one into a heavy session
 that sat idle past the prompt cache, which would re-send everything, once
@@ -370,7 +371,8 @@ def main():
         p = json.load(sys.stdin)
         if p.get("agent_id"):
             return 0   # a subagent's tool call; its parent gets checked on its own
-        tool = p.get("hook_event_name") == "PostToolUse"
+        event = p.get("hook_event_name")
+        tool = event in ("PostToolBatch", "PostToolUse")
         sid, transcript = p.get("session_id"), p.get("transcript_path")
         cwd = p.get("cwd") or ""
         if not tool:
@@ -384,7 +386,7 @@ def main():
         out = check(sid, transcript, cwd)
         if out and tool:   # plain stdout only reaches the model on UserPromptSubmit
             out = json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PostToolUse", "additionalContext": out}})
+                "hookEventName": event, "additionalContext": out}})
         if out:
             print(out)
     except Exception:

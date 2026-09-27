@@ -10,8 +10,8 @@ tokens on every single prompt, and a compacted one has already lost detail.
 
 ## what it does
 
-Before each prompt, and after each tool call so a long agentic turn can't
-run past it, a hook reads how much context the last turn carried. Past the
+Before each prompt, and after each batch of tool calls so a long agentic
+turn can't run past it, a hook reads how much context the last turn carried. Past the
 line (150k by default), or right after a compaction, the model is asked to:
 
 1. stop at the next safe point — no new task, no browsing, builds or test runs,

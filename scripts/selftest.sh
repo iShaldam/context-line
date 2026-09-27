@@ -36,6 +36,7 @@ plant "baseline ignored"        's/base = r.get("baseline") or baseline_of(trans
 plant "baseline from the tail"  's/            read = 0$/            f.seek(max(0, f.seek(0, 2) - TAIL)); read = 0/'
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "tool nudge as plain text" 's/if out and tool:/if False:/'
+plant "batch nudge misnamed"   's/"hookEventName": event,/"hookEventName": "PostToolUse",/'
 plant "no lock on state"        's/            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)/            pass/'
 plant "lock waits forever"      's/fcntl.LOCK_EX | fcntl.LOCK_NB/fcntl.LOCK_EX/'
 plant "rename step dropped"     's/first: rename session <id> to/first: to/'

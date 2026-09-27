@@ -529,6 +529,13 @@ class HookCommand(Base):
     def test_every_hook_has_a_short_timeout(self):
         self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5])
 
+    def test_mid_turn_check_runs_once_per_tool_batch(self):
+        # PostToolUse fires once per tool, so parallel calls raced each other
+        with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
+            events = json.load(f)["hooks"]
+        self.assertEqual(sorted(events), ["PostToolBatch", "UserPromptSubmit"])
+        self.assertNotIn("matcher", events["PostToolBatch"][0])   # the event takes none
+
     def run_command(self, pythons):
         """Run the hooks.json command with only `pythons` ({name: target}) on PATH."""
         import shutil
@@ -625,17 +632,17 @@ class NeverBlocks(Base):
     def tool_payload(self, **extra):
         return dict({"session_id": "abc123", "transcript_path": self.transcript,
                      "cwd": self.dir, "permission_mode": "default",
-                     "hook_event_name": "PostToolUse", "tool_name": "Bash",
-                     "tool_input": {"command": "ls"}, "tool_response": {"stdout": ""},
-                     "tool_use_id": "toolu_1"}, **extra)
+                     "hook_event_name": "PostToolBatch",
+                     "tool_calls": [{"tool_name": "Bash", "tool_input": {"command": "ls"},
+                                     "tool_use_id": "toolu_1", "tool_response": ""}]}, **extra)
 
-    def test_post_tool_use_reaches_model_as_json(self):
+    def test_tool_batch_reaches_model_as_json(self):
         # plain stdout only reaches the model on UserPromptSubmit
         self.at(160_000)
         r = self.run_hook(json.dumps(self.tool_payload()))
         self.assertEqual(r.returncode, 0)
         out = json.loads(r.stdout)["hookSpecificOutput"]
-        self.assertEqual(out["hookEventName"], "PostToolUse")
+        self.assertEqual(out["hookEventName"], "PostToolBatch")
         self.assertIn("START A FRESH SESSION", out["additionalContext"])
 
     def test_subagent_tool_use_is_skipped(self):

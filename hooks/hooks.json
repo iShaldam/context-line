@@ -11,9 +11,8 @@
         ]
       }
     ],
-    "PostToolUse": [
+    "PostToolBatch": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
