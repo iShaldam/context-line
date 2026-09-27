@@ -69,7 +69,7 @@ Environment variables, all optional:
 | `CONTEXT_LINE_LINE` | `150000` | tokens of context that trigger a nudge |
 | `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
 | `CONTEXT_LINE_HANDOFF` | — | always write the handoff to this file |
-| `CONTEXT_LINE_GAP` | the cache's TTL | seconds idle before the resume guard holds a prompt back; `0` turns it off |
+| `CONTEXT_LINE_GAP` | the cache's TTL | seconds idle before the resume guard holds a prompt back; `0` or less turns it off |
 
 On a 1M-context model you may want a higher line; on a tight plan, a lower one.
 

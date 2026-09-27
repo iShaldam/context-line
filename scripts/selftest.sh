@@ -50,6 +50,7 @@ plant "in flight reads the last row" 's/        if _usage(line):$/        if Tru
 plant "every stop reads as in flight" 's/== "tool_use"$/!= "end_turn"/'
 plant "gap check skips the line" 's/if not _heavy(ctx, base, cfg):/if False:/'
 plant "gap off ignored"         's/ or not transcript or off:/ or not transcript:/'
+plant "negative gap not off"    's/cfg\["gap"\] <= 0/cfg["gap"] == 0/'
 plant "headless runs guarded"   's/if _headless() or /if /'
 plant "block on tool events"    's/        if event == "UserPromptSubmit":/        if True:/'
 plant "block on any non-tool event" 's/        if event == "UserPromptSubmit":/        if not tool:/'

@@ -334,6 +334,11 @@ class Gap(Base):
         self.handed_off()
         self.assertEqual(self.guard(), "")
 
+    def test_negative_gap_turns_it_off_too(self):
+        os.environ["CONTEXT_LINE_GAP"] = "-1"
+        self.handed_off()
+        self.assertEqual(self.guard(), "")
+
     def test_missing_timestamp_goes_through(self):
         self.at(200_000)
         self.assertEqual(self.guard(), "")
