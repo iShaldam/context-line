@@ -25,8 +25,8 @@ HEAD = 2_000_000     # bytes to search from the start for the first usage row
 
 def _int_env(name, default):
     try:
-        return int(os.environ.get(name, default))
-    except ValueError:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
         return default
 
 
@@ -34,7 +34,7 @@ def settings():
     return {
         "line": _int_env("CONTEXT_LINE_LINE", 150000),
         "min_growth": _int_env("CONTEXT_LINE_MIN_GROWTH", 40000),
-        "gap": _int_env("CONTEXT_LINE_GAP", 3600),
+        "gap": _int_env("CONTEXT_LINE_GAP", None),   # None: the session's cache TTL
     }
 
 
@@ -130,6 +130,17 @@ def baseline_of(transcript):
     return 0
 
 
+def _tail(transcript):
+    """The transcript's last TAIL bytes as lines, or [] if it can't be read."""
+    try:
+        with open(transcript, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - TAIL))
+            return f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return []
+
+
 def context_of(transcript):
     """(context tokens carried by the last turn, whether it was compacted,
     epoch time of that last API call or None).
@@ -142,14 +153,7 @@ def context_of(transcript):
     than the last usage row doesn't affect when.
     """
     ctx, compacted, when = 0, False, None
-    try:
-        with open(transcript, "rb") as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - TAIL))
-            lines = f.read().decode("utf-8", "ignore").splitlines()
-    except OSError:
-        return 0, False, None
-    for line in reversed(lines):
+    for line in reversed(_tail(transcript)):
         if '"isCompactSummary":true' in line.replace(" ", ""):
             compacted = True
         if not ctx:
@@ -157,6 +161,24 @@ def context_of(transcript):
             if ctx:
                 when = None if compacted else _when(line)
     return ctx, compacted, when
+
+
+def cache_ttl(transcript):
+    """Seconds this session's prompt cache lasts, from its last cache write:
+    an hour on a subscription within included usage, 5 minutes on an API key
+    or usage credits. An hour when no row in the tail says."""
+    for line in reversed(_tail(transcript)):
+        if "ephemeral_" not in line:
+            continue   # most rows, and every big tool result, skip the parse
+        try:
+            c = json.loads(line)["message"]["usage"]["cache_creation"]
+            if c.get("ephemeral_1h_input_tokens"):
+                return 3600
+            if c.get("ephemeral_5m_input_tokens"):
+                return 300
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return 3600
 
 
 # The paste block names the old session so the NEW one labels it done: (or
@@ -240,14 +262,7 @@ def _wrote(transcript, path, since):
         return False
     home = os.path.expanduser("~")
     tilde = "~" + path[len(home):] if path.startswith(home + os.sep) else None
-    try:
-        with open(transcript, "rb") as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - TAIL))
-            lines = f.read().decode("utf-8", "ignore").splitlines()
-    except OSError:
-        return False
-    for line in lines:
+    for line in _tail(transcript):
         if path not in line and (tilde is None or tilde not in line):
             continue   # matched raw: a path with spaces must still match
         when = _when(line)
@@ -289,14 +304,15 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     same prompt sent again goes through (no API call has happened since, so
     the last call's time matches).
     """
-    if _headless() or not session_id or not transcript or settings()["gap"] <= 0:
-        return ""
     cfg = settings()
+    off = cfg["gap"] is not None and cfg["gap"] <= 0
+    if _headless() or not session_id or not transcript or off:
+        return ""
     ctx, _, when = context_of(transcript)
     if when is None:
         return ""
     gap = time.time() - when
-    if gap < cfg["gap"]:
+    if gap < (cfg["gap"] or cache_ttl(transcript)):
         return ""
     r = _load(session_id)
     base = r.get("baseline") or baseline_of(transcript)

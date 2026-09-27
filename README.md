@@ -38,10 +38,11 @@ nobody mistakes an unfinished job for a done one. Nothing gets archived or delet
 sessions drop out of transcript search. Outside the desktop app there's no
 session tool, so the line is left out.
 
-The prompt cache lasts about an hour. Come back to a heavy session after
-that and your next prompt re-sends the whole thing, so the first prompt
-after an hour idle is held back once, with the cost and the handoff spelled
-out. Send it again to go on. It only fires on sessions already over the line
+The prompt cache lasts an hour on a subscription and 5 minutes on an API key
+or usage credits; the hook reads which from the session's last cache write.
+Come back to a heavy session after that and your next prompt re-sends the
+whole thing, so the first prompt after the cache has expired is held back
+once, with the cost and the handoff spelled out. Send it again to go on. It only fires on sessions already over the line
 that have written their handoff: without one, `/handoff` would re-send it all
 anyway, so the prompt just goes through.
 Scripts and agents that resume heavy sessions (`claude -p --resume`, the
@@ -68,11 +69,9 @@ Environment variables, all optional:
 | `CONTEXT_LINE_LINE` | `150000` | tokens of context that trigger a nudge |
 | `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
 | `CONTEXT_LINE_HANDOFF` | — | always write the handoff to this file |
-| `CONTEXT_LINE_GAP` | `3600` | seconds idle before the resume guard holds a prompt back; `0` turns it off |
+| `CONTEXT_LINE_GAP` | the cache's TTL | seconds idle before the resume guard holds a prompt back; `0` turns it off |
 
 On a 1M-context model you may want a higher line; on a tight plan, a lower one.
-
-With the API's 5-minute prompt cache, set `CONTEXT_LINE_GAP=300`.
 
 ## privacy
 

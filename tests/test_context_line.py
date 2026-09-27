@@ -8,18 +8,23 @@ sys.path.insert(0, os.path.join(ROOT, "hooks"))
 import context_line as cl  # noqa: E402
 
 
-def usage_row(ctx, ts=None):
+def usage_row(ctx, ts=None, cache=None):
+    """cache: "1h" or "5m" makes the row a cache write with that TTL."""
     row = {"type": "assistant", "message": {"usage": {
         "input_tokens": 10, "cache_read_input_tokens": ctx - 10,
         "cache_creation_input_tokens": 0}}}
     if ts is not None:
         row["timestamp"] = iso(ts)
+    if cache:
+        row["message"]["usage"]["cache_creation"] = {
+            "ephemeral_5m_input_tokens": 1000 if cache == "5m" else 0,
+            "ephemeral_1h_input_tokens": 1000 if cache == "1h" else 0}
     return row
 
 
-def edit_row(path, ts, ctx=200_000, tool="Edit"):
+def edit_row(path, ts, ctx=200_000, tool="Edit", cache=None):
     """An assistant turn that runs `tool` on `path`: a tool_use row that carries usage."""
-    row = usage_row(ctx, ts=ts)
+    row = usage_row(ctx, ts=ts, cache=cache)
     inp = {"command": f"cat >> {path}"} if tool == "Bash" else {"file_path": path}
     row["message"]["content"] = [{"type": "tool_use", "name": tool, "input": inp}]
     return row
@@ -62,15 +67,15 @@ class Base(unittest.TestCase):
         now = time.time()
         self.write(usage_row(base, ts=now - secs - 60), usage_row(ctx, ts=now - secs))
 
-    def handed_off(self, sid="s1", ctx=200_000, base=20_000, secs=2 * 3600):
+    def handed_off(self, sid="s1", ctx=200_000, base=20_000, secs=2 * 3600, cache=None):
         """idle(), but s1 was nudged and then wrote its handoff before going
         quiet: the one case the resume guard holds a prompt back."""
         now = time.time()
         t = now - secs - 600
         path = os.environ["CONTEXT_LINE_HANDOFF"] = os.path.join(self.dir, "HANDOFF.md")
         open(path, "w").close()
-        self.write(usage_row(base, ts=t - 60), usage_row(ctx, ts=t),
-                   edit_row(path, ts=now - secs, ctx=ctx))
+        self.write(usage_row(base, ts=t - 60, cache=cache), usage_row(ctx, ts=t, cache=cache),
+                   edit_row(path, ts=now - secs, ctx=ctx, cache=cache))
         r = cl._load(sid)
         r.update(nudged_at=t, nudge_ctx=ctx, nudges=1)
         cl._save(sid, r)
@@ -282,6 +287,27 @@ class Gap(Base):
         self.guard()
         self.handed_off(ctx=210_000, secs=90 * 60)   # the resend ran, then it sat again
         self.assertIn("not sent", self.guard())
+
+    def test_five_minute_cache_guards_after_five_minutes(self):
+        # API keys and usage credits get a 5-minute cache, not an hour
+        self.handed_off(secs=10 * 60, cache="5m")
+        self.assertIn("idle 10m", self.guard())
+
+    def test_hour_cache_waits_the_hour(self):
+        self.handed_off(secs=30 * 60, cache="1h")
+        self.assertEqual(self.guard(), "")
+
+    def test_last_cache_write_decides_the_ttl(self):
+        self.write(usage_row(20_000, cache="1h"), usage_row(150_000, cache="5m"),
+                   usage_row(160_000))   # a pure cache read says nothing
+        self.assertEqual(cl.cache_ttl(self.transcript), 300)
+        self.write(usage_row(160_000))
+        self.assertEqual(cl.cache_ttl(self.transcript), 3600)   # unknown: the old hour
+
+    def test_env_gap_beats_the_cache(self):
+        os.environ["CONTEXT_LINE_GAP"] = "3600"
+        self.handed_off(secs=10 * 60, cache="5m")
+        self.assertEqual(self.guard(), "")
 
     def test_gap_zero_turns_it_off(self):
         os.environ["CONTEXT_LINE_GAP"] = "0"
