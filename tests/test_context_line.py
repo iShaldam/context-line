@@ -36,8 +36,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
         env = {"CLAUDE_PLUGIN_DATA": os.path.join(self.dir, "state"),
-               "CONTEXT_LINE_LINE": "150000", "CONTEXT_LINE_FLOOR": "80000",
-               "CONTEXT_LINE_ADAPT": "1"}
+               "CONTEXT_LINE_LINE": "150000"}
         self.env = mock.patch.dict(os.environ, env)
         self.env.start()
         os.environ.pop("CONTEXT_LINE_HANDOFF", None)
@@ -72,9 +71,9 @@ class Base(unittest.TestCase):
         open(path, "w").close()
         self.write(usage_row(base, ts=t - 60), usage_row(ctx, ts=t),
                    edit_row(path, ts=now - secs, ctx=ctx))
-        s = cl._load(cl.settings())
+        s = cl._load()
         s["sessions"].setdefault(sid, {}).update(
-            seen=now, nudged_at=t, nudge_ctx=ctx, nudges=1, prompts_since_nudge=0)
+            seen=now, nudged_at=t, nudge_ctx=ctx, nudges=1)
         cl._save(s)
         return path
 
@@ -128,6 +127,22 @@ class Threshold(Base):
         self.at(100_000)
         self.assertTrue(cl.check("s1", self.transcript))
 
+    def test_ignored_nudge_leaves_the_line_alone(self):
+        # a line that learned only ever went down, then sat at the floor for good
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        for _ in range(3):
+            cl.check("s1", self.transcript)   # the user talks past it
+        self.at(175_000)
+        cl.check("s1", self.transcript)   # and so does the model
+        self.at(145_000)
+        self.assertEqual(cl.check("s2", self.transcript), "")
+
+    def test_quiet_check_writes_no_state(self):
+        self.at(50_000)
+        self.assertEqual(cl.check("s1", self.transcript), "")
+        self.assertFalse(os.path.exists(self.state_file()))
+
 
 class Baseline(Base):
     """A fresh session already carries ~100k of tools and skills; only growth counts."""
@@ -180,34 +195,6 @@ class Timestamps(Base):
         self.write({"isCompactSummary": True}, usage_row(20_000, ts=t - 60),
                    usage_row(200_000, ts=t))
         self.assertAlmostEqual(cl.context_of(self.transcript)[2], t, places=2)
-
-
-class MidTurn(Base):
-    def test_tool_event_nudges(self):
-        self.at(150_000)
-        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript, event="tool"))
-
-    def test_quiet_tool_event_writes_no_state(self):
-        self.at(50_000)
-        self.assertEqual(cl.check("s1", self.transcript, event="tool"), "")
-        self.assertFalse(os.path.exists(self.state_file()))
-
-    def test_tool_event_does_not_count_as_prompt(self):
-        self.at(150_000)
-        cl.check("s1", self.transcript)
-        for _ in range(cl.TAKEN_WITHIN):
-            cl.check("s1", self.transcript)
-        cl.check("s1", self.transcript, event="tool")
-        self.assertIsNone(self.state()["sessions"]["s1"].get("graded"))
-        self.assertEqual(self.state()["line"], 150_000)
-
-    def test_model_keeping_going_is_ignored(self):
-        self.at(150_000)
-        cl.check("s1", self.transcript)
-        self.at(170_000)
-        cl.check("s1", self.transcript, event="tool")
-        self.assertEqual(self.state()["sessions"]["s1"]["graded"], "ignored")
-        self.assertEqual(self.state()["line"], 140_000)
 
 
 class Gap(Base):
@@ -434,59 +421,6 @@ class Gap(Base):
                 self.assertNotIn("secret plan", f.read())
 
 
-class Learning(Base):
-    def ignore_one(self, sid):
-        self.at(150_000)
-        cl.check(sid, self.transcript)
-        for _ in range(cl.TAKEN_WITHIN + 1):
-            cl.check(sid, self.transcript)
-
-    def test_ignored_nudge_lowers_line(self):
-        self.ignore_one("s1")
-        self.assertEqual(self.state()["line"], 140_000)
-
-    def test_line_never_drops_below_floor(self):
-        os.environ["CONTEXT_LINE_LINE"] = "85000"
-        self.ignore_one("s1")
-        self.ignore_one("s2")
-        self.assertEqual(self.state()["line"], 80_000)
-
-    def test_line_set_below_floor_is_never_raised(self):
-        os.environ["CONTEXT_LINE_LINE"] = "60000"
-        self.ignore_one("s1")
-        self.assertEqual(self.state()["line"], 60_000)
-
-    def test_adapt_off_keeps_line(self):
-        os.environ["CONTEXT_LINE_ADAPT"] = "0"
-        self.ignore_one("s1")
-        self.assertEqual(self.state()["line"], 150_000)
-
-    def test_grade_once_per_session(self):
-        self.ignore_one("s1")
-        self.at(185_000)
-        self.assertIn("nudge #2", cl.check("s1", self.transcript))
-        for _ in range(cl.TAKEN_WITHIN + 1):
-            cl.check("s1", self.transcript)
-        self.assertEqual(self.state()["line"], 140_000)
-
-    def test_quiet_session_is_taken(self):
-        self.at(150_000)
-        cl.check("s1", self.transcript)
-        s = self.state()
-        s["sessions"]["s1"]["seen"] = time.time() - cl.QUIET - 1
-        cl._save(s)
-        cl.check("s2", self.transcript)
-        self.assertEqual(self.state()["sessions"]["s1"]["graded"], "taken")
-        self.assertEqual(self.state()["line"], 150_000)
-
-    def test_changed_env_line_resets_learned_line(self):
-        self.ignore_one("s1")
-        os.environ["CONTEXT_LINE_LINE"] = "120000"
-        self.write(usage_row(10))
-        cl.check("s3", self.transcript)
-        self.assertEqual(self.state()["line"], 120_000)
-
-
 class DoneLabel(Base):
     """The old session names itself in the paste block; the new one labels it
     done:, or handed off: when its last turn didn't complete (blocked, open)."""
@@ -558,7 +492,7 @@ class Concurrency(Base):
             return real(transcript)
 
         with mock.patch.object(cl, "context_of", racing):
-            cl.check("s1", self.transcript, event="tool")
+            cl.check("s1", self.transcript)
         other[0].wait(timeout=10)
         self.assertEqual(self.nudges_logged(), 1)
 
@@ -660,12 +594,6 @@ class NeverBlocks(Base):
         self.handed_off("abc123")   # a prompt here would be held back
         r = self.run_hook(json.dumps(self.tool_payload()))
         self.assertEqual((r.returncode, r.stdout), (0, ""))   # no block, already nudged
-
-    def test_held_back_prompt_does_not_count_toward_grading(self):
-        self.handed_off("abc123")   # nudged, wrote its handoff, then sat for 2h
-        r = self.run_hook(json.dumps(self.prompt_payload()))
-        self.assertEqual(json.loads(r.stdout)["decision"], "block")
-        self.assertEqual(self.state()["sessions"]["abc123"]["prompts_since_nudge"], 0)
 
     def test_broken_guard_still_nudges(self):
         self.at(160_000)

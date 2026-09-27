@@ -8,13 +8,7 @@ usage row and, once the session crosses a line (or gets compacted), asks the
 model to stop, write a handoff and give the user a paste-ready prompt for a
 new session. Only growth since the session's first turn counts: a fresh
 session already carries its tools and skills, and nagging on turn one helps
-no one.
-
-It learns from what the user does next. A nudge followed by the session going
-quiet is "taken"; one the user talks past is "ignored". Ignored nudges lower
-the line for next time -- the point is to catch it earlier, not to give up --
-and every nudge after the first in a session is firmer. So does context that
-keeps growing after a nudge: that's the model talking past it.
+no one. Every nudge after the first in a session is firmer.
 
 One prompt can be held back on purpose: the first one into a heavy session
 that sat idle past the prompt cache, which would re-send everything, once
@@ -27,11 +21,7 @@ try:
 except ImportError:   # windows: no lock, parallel tool calls may double-nudge
     fcntl = None
 
-STEP = 10000         # how far one ignored nudge moves the line
 RENUDGE = 30000      # context growth before nudging the same session again
-KEPT_GOING = 20000   # growth past a nudge that means it was ignored
-TAKEN_WITHIN = 2     # prompts after a nudge that still count as acting on it
-QUIET = 3600         # seconds of silence after a nudge that count as taken
 TAIL = 400_000       # bytes of transcript to read from the end
 HEAD = 2_000_000     # bytes to search from the start for the first usage row
 LOCK_TRIES = 10      # tries at the state lock before giving up on this event
@@ -48,9 +38,7 @@ def _int_env(name, default):
 def settings():
     return {
         "line": _int_env("CONTEXT_LINE_LINE", 150000),
-        "floor": _int_env("CONTEXT_LINE_FLOOR", 80000),
         "min_growth": _int_env("CONTEXT_LINE_MIN_GROWTH", 40000),
-        "adapt": os.environ.get("CONTEXT_LINE_ADAPT", "1") != "0",
         "gap": _int_env("CONTEXT_LINE_GAP", 3600),
     }
 
@@ -77,16 +65,13 @@ def handoff_path(cwd, session_id):
     return os.path.join(state_dir(), "handoffs", f"{day}-{session_id[:8]}.md")
 
 
-def _load(cfg):
+def _load():
     try:
         with open(os.path.join(state_dir(), "state.json")) as f:
             s = json.load(f)
     except (OSError, ValueError):
         s = {}
     s.setdefault("sessions", {})
-    # a changed CONTEXT_LINE_LINE wins over whatever the line learned before
-    if s.get("base") != cfg["line"] or "line" not in s:
-        s["base"] = s["line"] = cfg["line"]
     return s
 
 
@@ -176,32 +161,6 @@ def context_of(transcript):
     return ctx, compacted, when
 
 
-def _grade(s, cfg, sid, r, outcome):
-    """Once per session, so one stubborn session moves the line one STEP."""
-    r["graded"] = outcome
-    if outcome == "ignored" and cfg["adapt"]:
-        s["line"] = max(min(cfg["floor"], s["line"]), s["line"] - STEP)
-    _log({"ts": time.time(), "session": sid, "outcome": outcome,
-          "ctx": r.get("nudge_ctx"), "line_now": s["line"]})
-
-
-def _settle(s, cfg):
-    """Grade nudges whose session has moved on: taken if it went quiet.
-    Returns whether anything was graded."""
-    now, graded = time.time(), False
-    for sid, r in s["sessions"].items():
-        if not r.get("nudged_at") or r.get("graded") is not None:
-            continue
-        if r.get("prompts_since_nudge", 0) > TAKEN_WITHIN:
-            _grade(s, cfg, sid, r, "ignored")
-        elif now - r.get("seen", now) > QUIET:
-            _grade(s, cfg, sid, r, "taken")
-        else:
-            continue
-        graded = True
-    return graded
-
-
 # The paste block names the old session so the NEW one labels it done: (or
 # handed off: when its last turn was blocked or left a question open).
 # labelling at handoff time would mark it before anything replaced it, and a
@@ -230,9 +189,9 @@ def message(ctx, compacted, n, path):
             f"'read {path} first', and the first next step. (3) {RENAME_STEP}")
 
 
-def _heavy(ctx, base, s, cfg):
+def _heavy(ctx, base, cfg):
     """Over the line, counting only growth past the session's first turn."""
-    return ctx >= s["line"] and ctx - base >= cfg["min_growth"]
+    return ctx >= cfg["line"] and ctx - base >= cfg["min_growth"]
 
 
 def _lock(f):
@@ -249,12 +208,11 @@ def _lock(f):
     return False
 
 
-def check(session_id, transcript, cwd="", event="prompt"):
+def check(session_id, transcript, cwd=""):
     """Return an instruction for the model, or '' when the session is fine.
 
-    event is "prompt" (UserPromptSubmit) or "tool" (PostToolUse, mid-turn).
-    Only prompts count toward grading a nudge; a tool event that neither
-    nudges nor grades writes nothing, since every session shares the state.
+    A check that doesn't nudge writes nothing, since every session shares
+    the state.
     """
     if not session_id or not transcript:
         return ""
@@ -262,40 +220,29 @@ def check(session_id, transcript, cwd="", event="prompt"):
     with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
         if not _lock(lock):   # parallel tool calls fire their hooks at the same moment
             return ""
-        return _check(session_id, transcript, cwd, event)
+        return _check(session_id, transcript, cwd)
 
 
-def _check(session_id, transcript, cwd, event):
+def _check(session_id, transcript, cwd):
     cfg = settings()
-    s = _load(cfg)
+    s = _load()
     r = s["sessions"].setdefault(session_id, {})
-    r["seen"] = time.time()
-    prompt = event == "prompt"
-    if prompt and r.get("nudged_at"):
-        r["prompts_since_nudge"] = r.get("prompts_since_nudge", 0) + 1
-    changed = _settle(s, cfg) or prompt
-
     ctx, compacted, _ = context_of(transcript)
     base = r.get("baseline") or baseline_of(transcript)
-    if base:
-        r["baseline"] = base
     last = r.get("nudge_ctx")
-    if last is not None and r.get("graded") is None and ctx >= last + KEPT_GOING:
-        _grade(s, cfg, session_id, r, "ignored")   # the session talked past it
-        changed = True
     due = (compacted and not r.get("nudged_compact")) or (
-        _heavy(ctx, base, s, cfg) and (last is None or ctx >= last + RENUDGE))
+        _heavy(ctx, base, cfg) and (last is None or ctx >= last + RENUDGE))
     if not due:
-        if changed:
-            _save(s)
         return ""
 
     n = r.get("nudges", 0) + 1
-    r.update(nudges=n, nudged_at=time.time(), nudge_ctx=ctx, prompts_since_nudge=0)
+    r.update(nudges=n, nudged_at=time.time(), nudge_ctx=ctx, seen=time.time())
+    if base:
+        r["baseline"] = base
     if compacted:
         r["nudged_compact"] = True
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
-          "ctx": ctx, "compacted": compacted, "line": s["line"], "n": n})
+          "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
     _save(s)
     return message(ctx, compacted, n, handoff_path(cwd, session_id))
 
@@ -385,10 +332,10 @@ def _resume_guard(session_id, transcript, cwd, prompt):
     gap = time.time() - when
     if gap < cfg["gap"]:
         return ""
-    s = _load(cfg)
+    s = _load()
     r = s["sessions"].setdefault(session_id, {})
     base = r.get("baseline") or baseline_of(transcript)
-    if not _heavy(ctx, base, s, cfg):
+    if not _heavy(ctx, base, cfg):
         return ""
     r["seen"] = time.time()
     if base:
@@ -434,7 +381,7 @@ def main():
             if reason:   # held back once; the same prompt sent again goes through
                 print(json.dumps({"decision": "block", "reason": reason}))
                 return 0
-        out = check(sid, transcript, cwd, event="tool" if tool else "prompt")
+        out = check(sid, transcript, cwd)
         if out and tool:   # plain stdout only reaches the model on UserPromptSubmit
             out = json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PostToolUse", "additionalContext": out}})
