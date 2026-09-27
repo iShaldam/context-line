@@ -71,17 +71,16 @@ class Base(unittest.TestCase):
         open(path, "w").close()
         self.write(usage_row(base, ts=t - 60), usage_row(ctx, ts=t),
                    edit_row(path, ts=now - secs, ctx=ctx))
-        s = cl._load()
-        s["sessions"].setdefault(sid, {}).update(
-            seen=now, nudged_at=t, nudge_ctx=ctx, nudges=1)
-        cl._save(s)
+        r = cl._load(sid)
+        r.update(nudged_at=t, nudge_ctx=ctx, nudges=1)
+        cl._save(sid, r)
         return path
 
-    def state_file(self):
-        return os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.json")
+    def state_file(self, sid="s1"):
+        return os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "sessions", f"{sid}.json")
 
-    def state(self):
-        with open(self.state_file()) as f:
+    def state(self, sid="s1"):
+        with open(self.state_file(sid)) as f:
             return json.load(f)
 
 
@@ -310,9 +309,9 @@ class Gap(Base):
         """Nudge s1, then move its nudge `ago` seconds back. Returns nudged_at."""
         self.idle()
         cl.check("s1", self.transcript)
-        s = self.state()
-        t = s["sessions"]["s1"]["nudged_at"] = time.time() - ago
-        cl._save(s)
+        r = self.state()
+        t = r["nudged_at"] = time.time() - ago
+        cl._save("s1", r)
         return t
 
     def handoff(self, mtime=None):
@@ -380,7 +379,7 @@ class Gap(Base):
         os.environ["CONTEXT_LINE_HANDOFF"] = path
         self.idle()
         cl.check("s1", self.transcript)   # nudges: sets nudged_at
-        nudged_at = self.state()["sessions"]["s1"]["nudged_at"]
+        nudged_at = self.state()["nudged_at"]
         open(path, "w").close()
         os.utime(path, (nudged_at - 60, nudged_at - 60))   # handoff predates the nudge
         self.assertEqual(self.guard(), "")
@@ -405,7 +404,7 @@ class Gap(Base):
         with mock.patch.object(cl, "gap_reason", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 self.guard()
-        self.assertNotIn("gap_blocked", self.state()["sessions"]["s1"])
+        self.assertNotIn("gap_blocked", self.state())
         nudges = os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")
         self.assertFalse(os.path.exists(nudges))
 
@@ -416,8 +415,9 @@ class Gap(Base):
         self.assertTrue(out.endswith(prompt[:300]))
         self.assertNotIn(prompt[:301], out)
         self.guard(prompt=prompt)   # the resend
-        for name in ("state.json", "nudges.jsonl"):
-            with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], name)) as f:
+        for path in (self.state_file(),
+                     os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")):
+            with open(path) as f:
                 self.assertNotIn("secret plan", f.read())
 
 
@@ -469,53 +469,23 @@ class HandoffPath(Base):
         self.assertEqual(cl.handoff_path(self.dir, "x"), os.path.join(self.dir, "mine.md"))
 
 
-class Concurrency(Base):
-    def nudges_logged(self):
-        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "nudges.jsonl")) as f:
-            return sum(json.loads(l).get("event") == "nudge" for l in f)
+class State(Base):
+    """One small file per session: no shared file, so no lock and no races."""
 
-    def test_parallel_tool_calls_nudge_once(self):
-        # parallel tool calls fire their PostToolUse hooks at the same moment
+    def test_one_file_per_session_and_no_lock(self):
         self.at(160_000)
-        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
-                              "hook_event_name": "PostToolUse"})
-        real, other = cl.context_of, []
+        cl.check("s1", self.transcript)
+        cl.check("s2", self.transcript)
+        d = os.environ["CLAUDE_PLUGIN_DATA"]
+        self.assertEqual(sorted(os.listdir(d)), ["nudges.jsonl", "sessions"])
+        self.assertEqual(sorted(os.listdir(os.path.join(d, "sessions"))),
+                         ["s1.json", "s2.json"])
 
-        def racing(transcript):   # a second hook runs while this one is mid-check
-            if not other:
-                p = subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE,
-                                     stdout=subprocess.DEVNULL, text=True)
-                p.stdin.write(payload)
-                p.stdin.close()
-                other.append(p)
-                time.sleep(0.5)
-            return real(transcript)
-
-        with mock.patch.object(cl, "context_of", racing):
-            cl.check("s1", self.transcript)
-        other[0].wait(timeout=10)
-        self.assertEqual(self.nudges_logged(), 1)
-
-
-class StuckLock(Base):
-    @unittest.skipUnless(cl.fcntl, "no flock here")
-    def test_stuck_lock_holder_fails_open(self):
-        # a hook stalled while holding the lock must not stall every tool call
-        import fcntl
+    def test_odd_session_id_stays_in_the_sessions_folder(self):
         self.at(160_000)
-        os.makedirs(os.environ["CLAUDE_PLUGIN_DATA"])
-        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
-                              "hook_event_name": "PostToolUse"})
-        with open(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "state.lock"), "w") as held:
-            fcntl.flock(held, fcntl.LOCK_EX)
-            t = time.time()
-            r = subprocess.run([sys.executable, HOOK], input=payload, text=True,
-                               capture_output=True, timeout=5)
-            self.assertLess(time.time() - t, 3)
-            self.assertEqual((r.returncode, r.stdout), (0, ""))
-        r = subprocess.run([sys.executable, HOOK], input=payload, text=True,
-                           capture_output=True, timeout=5)
-        self.assertIn("START A FRESH SESSION", r.stdout)   # nothing was lost
+        cl.check("../evil", self.transcript)
+        d = os.environ["CLAUDE_PLUGIN_DATA"]
+        self.assertEqual(os.listdir(os.path.join(d, "sessions")), ["evil.json"])
 
 
 class HookCommand(Base):

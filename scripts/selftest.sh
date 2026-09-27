@@ -27,7 +27,8 @@ if ! (cd "$tmp" && python3 -m unittest discover -s tests >/dev/null 2>&1); then
 fi
 rm -rf "$tmp"
 plant "line comparison flipped" 's/ctx >= cfg\["line"\]/ctx < cfg["line"]/'
-plant "quiet checks save state" '/^def _check/,/^def /s/        return ""$/        _save(s); return ""/'
+plant "quiet checks save state" 's/^    if not due:$/    if _save(session_id, r) or not due:/'
+plant "session id used raw"     's/name = "".join(c for c in session_id if c.isalnum() or c in "-_")/name = session_id/'
 plant "renudge gap dropped"     's/ctx >= last + RENUDGE/True/'
 plant "errors escape main"      's/        pass   # silence/        raise/'
 plant "compaction ignored"      's/compacted = True$/compacted = False/'
@@ -37,8 +38,6 @@ plant "baseline from the tail"  's/            read = 0$/            f.seek(max(
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "tool nudge as plain text" 's/if out and tool:/if False:/'
 plant "batch nudge misnamed"   's/"hookEventName": event,/"hookEventName": "PostToolUse",/'
-plant "no lock on state"        's/            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)/            pass/'
-plant "lock waits forever"      's/fcntl.LOCK_EX | fcntl.LOCK_NB/fcntl.LOCK_EX/'
 plant "rename step dropped"     's/first: rename session <id> to/first: to/'
 plant "handed off never used"   's/handed off: <title>/done: <title>/'
 plant "gap comparison flipped"  's/if gap < cfg\["gap"\]:/if gap >= cfg["gap"]:/'

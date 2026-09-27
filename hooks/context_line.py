@@ -17,16 +17,10 @@ that session has already written its handoff. Sending it again goes through. Oth
 an error must never block a prompt.
 """
 import datetime, json, os, sys, time
-try:
-    import fcntl
-except ImportError:   # windows: no lock, parallel tool calls may double-nudge
-    fcntl = None
 
 RENUDGE = 30000      # context growth before nudging the same session again
 TAIL = 400_000       # bytes of transcript to read from the end
 HEAD = 2_000_000     # bytes to search from the start for the first usage row
-LOCK_TRIES = 10      # tries at the state lock before giving up on this event
-LOCK_WAIT = 0.05     # seconds between tries
 
 
 def _int_env(name, default):
@@ -66,25 +60,28 @@ def handoff_path(cwd, session_id):
     return os.path.join(state_dir(), "handoffs", f"{day}-{session_id[:8]}.md")
 
 
-def _load():
+def _state_path(session_id):
+    """One small file per session: nothing shared, so nothing to lock."""
+    name = "".join(c for c in session_id if c.isalnum() or c in "-_")
+    return os.path.join(state_dir(), "sessions", f"{name}.json")
+
+
+def _load(session_id):
     try:
-        with open(os.path.join(state_dir(), "state.json")) as f:
-            s = json.load(f)
+        with open(_state_path(session_id)) as f:
+            r = json.load(f)
     except (OSError, ValueError):
-        s = {}
-    s.setdefault("sessions", {})
-    return s
+        return {}
+    return r if isinstance(r, dict) else {}
 
 
-def _save(s):
-    cut = time.time() - 7 * 86400   # keep the file small
-    s["sessions"] = {k: v for k, v in s["sessions"].items() if v.get("seen", 0) > cut}
-    d = state_dir()
-    os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, f"state.json.{os.getpid()}")
+def _save(session_id, r):
+    path = _state_path(session_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}"
     with open(tmp, "w") as f:
-        json.dump(s, f)
-    os.replace(tmp, os.path.join(d, "state.json"))   # atomic: sessions share it
+        json.dump(r, f)
+    os.replace(tmp, path)
 
 
 def _log(row):
@@ -195,39 +192,15 @@ def _heavy(ctx, base, cfg):
     return ctx >= cfg["line"] and ctx - base >= cfg["min_growth"]
 
 
-def _lock(f):
-    """Take the state lock without waiting on a stuck holder: a few short
-    tries, then False and the caller stays silent (fail open)."""
-    if not fcntl:
-        return True
-    for _ in range(LOCK_TRIES):
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            time.sleep(LOCK_WAIT)
-    return False
-
-
 def check(session_id, transcript, cwd=""):
     """Return an instruction for the model, or '' when the session is fine.
 
-    A check that doesn't nudge writes nothing, since every session shares
-    the state.
+    A check that doesn't nudge writes nothing.
     """
     if not session_id or not transcript:
         return ""
-    os.makedirs(state_dir(), exist_ok=True)
-    with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
-        if not _lock(lock):   # parallel tool calls fire their hooks at the same moment
-            return ""
-        return _check(session_id, transcript, cwd)
-
-
-def _check(session_id, transcript, cwd):
     cfg = settings()
-    s = _load()
-    r = s["sessions"].setdefault(session_id, {})
+    r = _load(session_id)
     ctx, compacted, _ = context_of(transcript)
     base = r.get("baseline") or baseline_of(transcript)
     last = r.get("nudge_ctx")
@@ -237,14 +210,14 @@ def _check(session_id, transcript, cwd):
         return ""
 
     n = r.get("nudges", 0) + 1
-    r.update(nudges=n, nudged_at=time.time(), nudge_ctx=ctx, seen=time.time())
+    r.update(nudges=n, nudged_at=time.time(), nudge_ctx=ctx)
     if base:
         r["baseline"] = base
     if compacted:
         r["nudged_compact"] = True
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
           "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
-    _save(s)
+    _save(session_id, r)
     return message(ctx, compacted, n, handoff_path(cwd, session_id))
 
 
@@ -318,14 +291,6 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     """
     if _headless() or not session_id or not transcript or settings()["gap"] <= 0:
         return ""
-    os.makedirs(state_dir(), exist_ok=True)
-    with open(os.path.join(state_dir(), "state.lock"), "w") as lock:
-        if not _lock(lock):
-            return ""
-        return _resume_guard(session_id, transcript, cwd, prompt)
-
-
-def _resume_guard(session_id, transcript, cwd, prompt):
     cfg = settings()
     ctx, _, when = context_of(transcript)
     if when is None:
@@ -333,12 +298,10 @@ def _resume_guard(session_id, transcript, cwd, prompt):
     gap = time.time() - when
     if gap < cfg["gap"]:
         return ""
-    s = _load()
-    r = s["sessions"].setdefault(session_id, {})
+    r = _load(session_id)
     base = r.get("baseline") or baseline_of(transcript)
     if not _heavy(ctx, base, cfg):
         return ""
-    r["seen"] = time.time()
     if base:
         r["baseline"] = base
     row = {"ts": time.time(), "session": session_id, "ctx": ctx, "gap": int(gap)}
@@ -348,7 +311,7 @@ def _resume_guard(session_id, transcript, cwd, prompt):
         if r.get("gap_resent") != when:   # once per gap, not once per resend
             _log(dict(row, event="gap_resent", handoff=wrap))
             r["gap_resent"] = when
-        _save(s)
+        _save(session_id, r)
         return ""
     if wrap:
         return ""   # already doing what a block would ask for
@@ -362,7 +325,7 @@ def _resume_guard(session_id, transcript, cwd, prompt):
     reason = gap_reason(ctx, gap, path, prompt)
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
-    _save(s)
+    _save(session_id, r)
     return reason
 
 

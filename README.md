@@ -76,11 +76,12 @@ With the API's 5-minute prompt cache, set `CONTEXT_LINE_GAP=300`.
 
 ## privacy
 
-Everything stays on your machine. The state file and `nudges.jsonl` log hold
-session ids, token counts and timestamps — never prompt text. When the resume guard holds a prompt back it shows you its first 300
-characters so you can copy them back; that text isn't stored. State lives in
-the plugin data folder (or `~/.local/state/context-line/`) and prunes itself
-after a week.
+Everything stays on your machine. State (one small file per nudged session)
+and the `nudges.jsonl` log hold session ids, token counts and timestamps —
+never prompt text. When the resume guard holds a prompt back it shows you its
+first 300 characters so you can copy them back; that text isn't stored. It all
+lives in the plugin data folder (or `~/.local/state/context-line/`); deleting
+it only resets the nudge counts.
 
 ## blocks only on purpose
 
