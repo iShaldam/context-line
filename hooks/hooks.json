@@ -21,6 +21,17 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "i=$(cat); for p in python3 'py -3' python; do o=$(printf %s \"$i\" | $p \"${CLAUDE_PLUGIN_ROOT}/hooks/context_line.py\" 2>/dev/null) && { printf %s \"$o\"; exit 0; }; done; exit 0",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
