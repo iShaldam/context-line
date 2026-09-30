@@ -23,6 +23,12 @@ Only growth counts: a fresh session already carries its tools, skills and
 connectors (often 100k+), so there's no nudge until the session has grown at
 least 40k past its first turn. A fresh one would be just as big.
 
+A compaction drops detail, so just before one runs (`PreCompact`) the hook
+saves the files the session edited, newest first, to the state folder. The
+nudge after the compaction points the model at that list so the handoff can
+carry it. Only what the transcript states: decisions can't be scraped, the
+model still writes those.
+
 The handoff goes to `HANDOFF.md` at the root of the current git repo, or to
 the plugin's state folder when you're not in one.
 
