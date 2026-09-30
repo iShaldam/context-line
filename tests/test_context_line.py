@@ -548,13 +548,13 @@ class HookCommand(Base):
                     for g in groups for h in g["hooks"]]
 
     def test_every_hook_has_a_short_timeout(self):
-        self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5])
+        self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5, 5])
 
     def test_mid_turn_check_runs_once_per_tool_batch(self):
         # PostToolUse fires once per tool, so parallel calls raced each other
         with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
             events = json.load(f)["hooks"]
-        self.assertEqual(sorted(events), ["PostToolBatch", "UserPromptSubmit"])
+        self.assertEqual(sorted(events), ["PostToolBatch", "PreCompact", "UserPromptSubmit"])
         self.assertNotIn("matcher", events["PostToolBatch"][0])   # the event takes none
 
     def run_command(self, pythons):
@@ -597,6 +597,75 @@ class HookCommand(Base):
     def test_real_python3_runs(self):
         r = self.run_command({"python3": sys.executable})
         self.assertIn("START A FRESH SESSION", r.stdout)
+
+
+class Snapshot(Base):
+    """PreCompact: the files this session touched, saved before compaction drops them."""
+
+    def touched(self, *paths, tool="Edit"):
+        now = time.time()
+        self.write(*[edit_row(p, ts=now + i, ctx=50_000, tool=tool) for i, p in enumerate(paths)])
+
+    def body(self, path):
+        with open(path) as f:
+            return f.read()
+
+    def test_lists_files_newest_first_without_repeats(self):
+        self.touched("/r/a.py", "/r/b.py", "/r/a.py")
+        snap = cl.snapshot("s1", self.transcript)
+        lines = [l for l in self.body(snap).splitlines() if l.startswith("- ")]
+        self.assertEqual(lines, ["- /r/a.py", "- /r/b.py"])
+
+    def test_write_and_multiedit_count_reads_do_not(self):
+        now = time.time()
+        rows = [edit_row("/r/w.py", ts=now, tool="Write"),
+                edit_row("/r/m.py", ts=now + 1, tool="MultiEdit"),
+                edit_row("/r/read.py", ts=now + 2, tool="Read")]
+        self.write(*rows)
+        text = self.body(cl.snapshot("s1", self.transcript))
+        self.assertIn("/r/w.py", text)
+        self.assertIn("/r/m.py", text)
+        self.assertNotIn("/r/read.py", text)
+
+    def test_stays_small_with_many_files(self):
+        self.touched(*[f"/r/dir/file{i}.py" for i in range(200)])
+        text = self.body(cl.snapshot("s1", self.transcript))
+        self.assertLessEqual(len([l for l in text.splitlines() if l.startswith("- ")]), 25)
+        self.assertLess(len(text), 2000)
+        self.assertIn("/r/dir/file199.py", text)   # the newest survive the cap
+
+    def test_nothing_touched_writes_nothing(self):
+        self.at(50_000)
+        self.assertEqual(cl.snapshot("s1", self.transcript), "")
+
+    def test_compaction_nudge_points_at_the_snapshot(self):
+        self.touched("/r/a.py")
+        snap = cl.snapshot("s1", self.transcript)
+        self.write({"isCompactSummary": True}, usage_row(20_000))
+        out = cl.check("s1", self.transcript)
+        self.assertIn(snap, out)
+
+    def test_compaction_nudge_without_snapshot_is_unchanged(self):
+        self.write({"isCompactSummary": True}, usage_row(20_000))
+        self.assertNotIn("snapshot", cl.check("s1", self.transcript))
+
+    def test_size_nudge_does_not_mention_the_snapshot(self):
+        self.touched("/r/a.py")
+        cl.snapshot("s1", self.transcript)
+        self.at(160_000)
+        self.assertNotIn("snapshot", cl.check("s1", self.transcript))
+
+    def test_pre_compact_event_saves_and_prints_nothing(self):
+        self.touched("/r/a.py")
+        payload = {"session_id": "s1", "transcript_path": self.transcript,
+                   "hook_event_name": "PreCompact", "trigger": "auto"}
+        r = subprocess.run([sys.executable, HOOK], input=json.dumps(payload), text=True,
+                           capture_output=True, timeout=10, env=dict(os.environ))
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        self.assertIn("/r/a.py", self.body(self.state("s1")["snapshot"]))
+
+    def test_unreadable_transcript_is_silent(self):
+        self.assertEqual(cl.snapshot("s1", os.path.join(self.dir, "missing.jsonl")), "")
 
 
 class NeverBlocks(Base):

@@ -60,10 +60,13 @@ def handoff_path(cwd, session_id):
     return os.path.join(state_dir(), "handoffs", f"{day}-{session_id[:8]}.md")
 
 
+def _name(session_id):
+    return "".join(c for c in session_id if c.isalnum() or c in "-_")
+
+
 def _state_path(session_id):
     """One small file per session: nothing shared, so nothing to lock."""
-    name = "".join(c for c in session_id if c.isalnum() or c in "-_")
-    return os.path.join(state_dir(), "sessions", f"{name}.json")
+    return os.path.join(state_dir(), "sessions", f"{_name(session_id)}.json")
 
 
 def _load(session_id):
@@ -208,17 +211,62 @@ RENAME_STEP = (
     "don't archive it; if the rename fails, say so and carry on)")
 
 
-def message(ctx, compacted, n, path):
+WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+SNAP_FILES = 25   # keeps the snapshot well under 2KB
+
+
+def snapshot(session_id, transcript):
+    """Save the files this session edited, newest first, before a compaction
+    summarises them away. Returns the snapshot's path, or '' when nothing was
+    touched or the transcript can't be read. Only facts the transcript states:
+    a decision can't be scraped, so the handoff still carries those.
+    """
+    seen = {}
+    try:
+        with open(transcript, "rb") as f:
+            for raw in f:
+                if b'"tool_use"' not in raw:
+                    continue   # most rows, and every big tool result, skip the parse
+                try:
+                    blocks = json.loads(raw)["message"]["content"]
+                    for b in blocks:
+                        if b.get("type") == "tool_use" and b.get("name") in WRITERS:
+                            path = b["input"].get("file_path") or b["input"].get("notebook_path")
+                            if path:
+                                seen.pop(path, None)   # re-insert: dict order is recency
+                                seen[path] = True
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    continue
+    except OSError:
+        return ""
+    if not seen:
+        return ""
+    files = list(seen)[-SNAP_FILES:][::-1]
+    path = os.path.join(state_dir(), "snapshots", f"{_name(session_id)}.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("# files this session edited, newest first (saved before compaction)\n"
+                + "".join(f"- {p}\n" for p in files))
+    r = _load(session_id)
+    r["snapshot"] = path
+    _save(session_id, r)
+    return path
+
+
+def message(ctx, compacted, n, path, snap=""):
     why = ("this session was compacted, so earlier detail is already lossy"
            if compacted else f"this session carries ~{ctx // 1000}k tokens, re-sent every turn")
     tone = ("Say it plainly before anything else" if n == 1
             else f"This is nudge #{n} and the session kept going -- lead with it, firmly")
+    extra = (f" (4) The compaction dropped detail: {snap} lists the files this session "
+             "edited, saved just before it; read it and fold it into that section."
+             if compacted and snap and os.path.exists(snap) else "")
     return (f"context-line: START A FRESH SESSION. {why}. {tone}: stop at the next safe "
             "point -- no new task and no tool-heavy steps (browsing, big reads, builds, test "
             f"runs). Then (1) add a dated section to {path} with what is done, what is next "
             "and any decisions made, keeping what is already there, (2) end with exactly ONE "
             "fenced ```text block for the user to paste into a new session: the one job, "
-            f"'read {path} first', and the first next step. (3) {RENAME_STEP}")
+            f"'read {path} first', and the first next step. (3) {RENAME_STEP}{extra}")
 
 
 def _heavy(ctx, base, cfg):
@@ -252,7 +300,7 @@ def check(session_id, transcript, cwd=""):
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
           "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
     _save(session_id, r)
-    return message(ctx, compacted, n, handoff_path(cwd, session_id))
+    return message(ctx, compacted, n, handoff_path(cwd, session_id), r.get("snapshot", ""))
 
 
 def _ago(secs):
@@ -366,6 +414,9 @@ def main():
         tool = event in ("PostToolBatch", "PostToolUse")
         sid, transcript = p.get("session_id"), p.get("transcript_path")
         cwd = p.get("cwd") or ""
+        if event == "PreCompact":   # save what the compaction is about to lose; say nothing
+            snapshot(sid, transcript)
+            return 0
         if event == "UserPromptSubmit":   # only a prompt can be held back
             try:
                 reason = resume_guard(sid, transcript, cwd, p.get("prompt") or "")
