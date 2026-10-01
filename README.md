@@ -1,12 +1,26 @@
 # context-line
 
-A plugin for Claude Code that tells you when a session has gotten heavy and
-it's time to start a fresh one — then writes the handoff and gives you the
-prompt to paste.
+I kept letting Claude Code sessions run long past the point they were worth
+it, and the bill for that shows up on every prompt. context-line is a plugin
+that tells you when a session has gotten heavy, writes the handoff, and gives
+you the prompt to paste into a fresh one.
 
 It can feel like it's cutting you off mid-flow. It's for the better: every
 turn re-sends the whole conversation, so a 200k-token session pays for 200k
 tokens on every single prompt, and a compacted one has already lost detail.
+
+## install
+
+```
+/plugin marketplace add iShaldam/context-line
+/plugin install context-line@context-line
+```
+
+Needs Python 3 on the system as `python3`, `py -3` or `python` (stdlib only,
+no packages). Without one the hooks stay silent instead of erroring.
+The mid-turn check uses the `PostToolBatch` hook event, tested on Claude
+Code 2.1.197; the changelog doesn't say which release added it, so on an
+older one update first.
 
 ## what it does
 
@@ -56,19 +70,6 @@ Scripts and agents that resume heavy sessions (`claude -p --resume`, the
 SDK, scheduled jobs) have nobody to send it again, so the guard skips them
 (`CLAUDE_CODE_ENTRYPOINT` starting with `sdk`). `CONTEXT_LINE_GAP=0` turns it
 off everywhere.
-
-## install
-
-```
-/plugin marketplace add iShaldam/context-line
-/plugin install context-line@context-line
-```
-
-Needs Python 3 on the system as `python3`, `py -3` or `python` (stdlib only,
-no packages). Without one the hooks stay silent instead of erroring.
-The mid-turn check uses the `PostToolBatch` hook event, tested on Claude
-Code 2.1.197; the changelog doesn't say which release added it, so on an
-older one update first.
 
 ## settings
 
