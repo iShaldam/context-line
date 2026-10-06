@@ -472,6 +472,67 @@ class Gap(Base):
                 self.assertNotIn("secret plan", f.read())
 
 
+class KeepGoing(Base):
+    """After a nudge the user may tell the session to keep going. Later
+    growth nudges still give the size but stop asking it to stop."""
+
+    def nudged_then(self, prompt):
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        self.at(155_000)
+        cl.check("s1", self.transcript, prompt=prompt)   # under RENUDGE: no nudge
+        self.at(180_000)
+        return cl.check("s1", self.transcript)
+
+    def test_continue_turns_later_nudges_into_a_note(self):
+        out = self.nudged_then("continue")
+        self.assertIn("~180k tokens", out)
+        self.assertIn("chose to keep going", out)
+        self.assertNotIn("START A FRESH SESSION", out)
+        self.assertNotIn("stop at the next safe point", out)
+
+    def test_other_keep_going_words_count(self):
+        for word in ("Keep going.", "go on", "carry on please", "proceed!"):
+            with self.subTest(word=word):
+                self.tearDown(); self.setUp()
+                self.assertIn("chose to keep going", self.nudged_then(word))
+
+    def test_other_prompts_keep_the_stop(self):
+        for prompt in ("", "what did you change?", "continue? no, write the handoff first"):
+            with self.subTest(prompt=prompt):
+                self.tearDown(); self.setUp()
+                out = self.nudged_then(prompt)
+                self.assertIn("START A FRESH SESSION", out)
+                self.assertIn("nudge #2", out)
+
+    def test_continue_before_any_nudge_changes_nothing(self):
+        self.at(50_000)
+        cl.check("s1", self.transcript, prompt="continue")
+        self.assertFalse(os.path.exists(self.state_file()))
+        self.at(150_000)
+        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+
+    def test_the_prompt_itself_is_never_stored(self):
+        self.nudged_then("continue")
+        self.assertNotIn("continue", json.dumps(self.state()))
+
+    def test_a_compaction_still_asks_for_the_handoff(self):
+        # compaction drops detail: a new reason, so the full nudge comes back
+        self.nudged_then("continue")
+        self.write({"isCompactSummary": True}, usage_row(20_000))
+        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+
+    def test_hook_passes_the_prompt_through(self):
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        payload = json.dumps({"session_id": "s1", "transcript_path": self.transcript,
+                              "hook_event_name": "UserPromptSubmit", "prompt": "continue"})
+        r = subprocess.run([sys.executable, HOOK], input=payload, text=True,
+                           capture_output=True, timeout=10)
+        self.assertEqual(r.returncode, 0)
+        self.assertTrue(self.state().get("kept_going"))
+
+
 class DoneLabel(Base):
     """The old session names itself in the paste block; the new one labels it
     done:, or handed off: when its last turn didn't complete (blocked, open)."""

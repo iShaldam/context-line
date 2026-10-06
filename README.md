@@ -46,7 +46,10 @@ model still writes those.
 The handoff goes to `HANDOFF.md` at the root of the current git repo, or to
 the plugin's state folder when you're not in one.
 
-Keep going past a nudge and the next one comes 30k later, firmer.
+Keep going past a nudge and the next one comes 30k later, firmer. Answer a
+nudge with "continue" (or "keep going", "go on", "carry on", "proceed") and
+later nudges in that session only note the size; a compaction still asks for
+the handoff.
 
 `/handoff` does the same wrap-up on demand, whenever you want it.
 

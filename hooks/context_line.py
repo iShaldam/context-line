@@ -9,7 +9,8 @@ reads the transcript's last usage row and, once the session crosses a line
 user a paste-ready prompt for a new session. Only growth since the session's
 first turn counts: a fresh session already carries its tools and skills, and
 nagging on turn one helps no one. Every nudge after the first in a session
-is firmer.
+is firmer, unless the user has since told the session to keep going: then
+later nudges only note the size and don't ask it to stop.
 
 One prompt can be held back on purpose: the first one into a heavy session
 that sat idle past the prompt cache, which would re-send everything, once
@@ -19,6 +20,7 @@ an error must never block a prompt.
 import datetime, json, os, sys, time
 
 RENUDGE = 30000      # context growth before nudging the same session again
+KEEP_GOING = ("continue", "keep going", "go on", "carry on", "proceed")
 TAIL = 400_000       # bytes of transcript to read from the end
 HEAD = 2_000_000     # bytes to search from the start for the first usage row
 
@@ -253,6 +255,23 @@ def snapshot(session_id, transcript):
     return path
 
 
+def keeps_going(prompt):
+    """True for a short prompt that tells the session to go on, like
+    "continue" or "keep going". A question or a longer ask never counts."""
+    words = "".join(c if c.isalpha() or c.isspace() else " " for c in prompt.lower()).split()
+    said = " ".join(words)
+    return (0 < len(words) <= 4 and "?" not in prompt
+            and any(said == k or said.startswith(k + " ") for k in KEEP_GOING))
+
+
+def note(ctx):
+    """A later nudge once the user chose to keep going: the size, no stop."""
+    return (f"context-line: this session carries ~{ctx // 1000}k tokens, re-sent every turn. "
+            "The user chose to keep going here after an earlier nudge, so don't stop or "
+            "write a handoff for this; keep working, and mention the size in one line at "
+            "the end of your reply.")
+
+
 def message(ctx, compacted, n, path, snap=""):
     why = ("this session was compacted, so earlier detail is already lossy"
            if compacted else f"this session carries ~{ctx // 1000}k tokens, re-sent every turn")
@@ -274,15 +293,20 @@ def _heavy(ctx, base, cfg):
     return ctx >= cfg["line"] and ctx - base >= cfg["min_growth"]
 
 
-def check(session_id, transcript, cwd=""):
+def check(session_id, transcript, cwd="", prompt=""):
     """Return an instruction for the model, or '' when the session is fine.
 
-    A check that doesn't nudge writes nothing.
+    A check that doesn't nudge writes nothing, except the kept_going flag
+    when the user answers a nudge with "continue" (a flag only, never the
+    prompt).
     """
     if not session_id or not transcript:
         return ""
     cfg = settings()
     r = _load(session_id)
+    if r.get("nudges") and not r.get("kept_going") and keeps_going(prompt):
+        r["kept_going"] = True
+        _save(session_id, r)
     ctx, compacted, _ = context_of(transcript)
     base = r.get("baseline") or baseline_of(transcript)
     last = r.get("nudge_ctx")
@@ -300,6 +324,8 @@ def check(session_id, transcript, cwd=""):
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
           "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
     _save(session_id, r)
+    if r.get("kept_going") and not compacted:
+        return note(ctx)
     return message(ctx, compacted, n, handoff_path(cwd, session_id), r.get("snapshot", ""))
 
 
@@ -425,7 +451,8 @@ def main():
             if reason:   # held back once; the same prompt sent again goes through
                 print(json.dumps({"decision": "block", "reason": reason}))
                 return 0
-        out = check(sid, transcript, cwd)
+        prompt = (p.get("prompt") or "") if event == "UserPromptSubmit" else ""
+        out = check(sid, transcript, cwd, prompt)
         if out and tool:   # plain stdout only reaches the model on UserPromptSubmit
             out = json.dumps({"hookSpecificOutput": {
                 "hookEventName": event, "additionalContext": out}})
