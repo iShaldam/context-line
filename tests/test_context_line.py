@@ -534,9 +534,10 @@ class KeepGoing(Base):
 
 
 class DoneLabel(Base):
-    """The old session names itself in the paste block; the new one labels it
-    done:, or handed off: when its last turn didn't complete (blocked, open)."""
-    LINE = 'first: rename session <id> to "handed off: <title>" if'
+    """The old session names itself in the paste block and picks its own label
+    there: done: when its work is finished, handed off: when work is left. The
+    new session only runs the rename. get_session has no turn status to read."""
+    LINE = 'first: rename session <id> to "<label>: <title>"'
 
     def test_nudge_asks_for_the_rename_line(self):
         self.at(150_000)
@@ -545,12 +546,18 @@ class DoneLabel(Base):
         self.assertIn('get_session with "self"', out)
         self.assertIn("don't archive it", out)
 
-    def test_rename_line_picks_the_label_from_the_last_turn_status(self):
+    def test_old_session_picks_the_label_itself(self):
         self.at(150_000)
         out = cl.check("s1", self.transcript)
-        self.assertIn('postTurnSummary status_category is not "completed"', out)
-        self.assertIn('otherwise to "done: <title>"', out)
+        self.assertIn('"done" when nothing is left for the new session', out)
+        self.assertIn('otherwise "handed off"', out)
         self.assertIn('starts with "done: " or "handed off: "', out)
+
+    def test_no_field_get_session_never_returns(self):
+        self.at(150_000)
+        self.assertNotIn("postTurnSummary", cl.check("s1", self.transcript))
+        with open(os.path.join(ROOT, "commands", "handoff.md")) as f:
+            self.assertNotIn("postTurnSummary", f.read())
 
     def test_compaction_nudge_asks_too(self):
         self.write({"isCompactSummary": True}, usage_row(20_000))
@@ -560,6 +567,7 @@ class DoneLabel(Base):
         with open(os.path.join(ROOT, "commands", "handoff.md")) as f:
             text = f.read()
         self.assertIn(self.LINE, text)
+        self.assertIn('"done" when nothing is left for the new session', text)
         self.assertIn("don't archive it", text)
 
 

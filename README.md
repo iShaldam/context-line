@@ -54,10 +54,10 @@ the handoff.
 `/handoff` does the same wrap-up on demand, whenever you want it.
 
 In the Claude desktop app the paste block ends with one more line naming
-the old session, and the new session renames it to `done: <title>`, so the
-sidebar shows what's finished. If the old session's last turn didn't complete
-(blocked, or a question left open) it gets `handed off: <title>` instead, so
-nobody mistakes an unfinished job for a done one. Nothing gets archived or deleted: archived
+the old session and its label, and the new session runs the rename: `done:
+<title>` when the old session's work is finished, so the sidebar shows what's
+finished, or `handed off: <title>` when work is left, so nobody mistakes an
+unfinished job for a done one. The old session picks the label, since it knows. Nothing gets archived or deleted: archived
 sessions drop out of transcript search. Outside the desktop app there's no
 session tool, so the line is left out.
 

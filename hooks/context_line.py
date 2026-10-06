@@ -198,19 +198,21 @@ def cache_ttl(transcript):
     return 3600
 
 
-# The paste block names the old session so the NEW one labels it done: (or
-# handed off: when its last turn was blocked or left a question open).
-# labelling at handoff time would mark it before anything replaced it, and a
-# hook can't reach the desktop app's session tools anyway. Keep the line in
-# sync with commands/handoff.md (a test checks).
+# The paste block names the old session and its label: done: when its work is
+# finished, handed off: when work is left. The old session knows which; the
+# new one only runs the rename, since labelling at handoff time would mark it
+# before anything replaced it, and a hook can't reach the desktop app's
+# session tools anyway. get_session reports no turn status, so the label can't
+# be read back later. Keep the line in sync with commands/handoff.md (a test
+# checks).
 RENAME_STEP = (
     "if a tool can tell you this session's own id and title (in the Claude desktop "
     "app: get_session with \"self\"), add one last line to that block, outside any "
-    "word limit:\n"
-    "first: rename session <id> to \"handed off: <title>\" if get_session <id> shows its "
-    "postTurnSummary status_category is not \"completed\" (blocked or open), otherwise to "
-    "\"done: <title>\" (skip if it already starts with \"done: \" or \"handed off: \"; "
-    "don't archive it; if the rename fails, say so and carry on)")
+    "word limit, with <label> already filled in: \"done\" when nothing is left for "
+    "the new session, otherwise \"handed off\":\n"
+    "first: rename session <id> to \"<label>: <title>\" (skip if it already starts "
+    "with \"done: \" or \"handed off: \"; don't archive it; if the rename fails, say "
+    "so and carry on)")
 
 
 WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
