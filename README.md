@@ -28,8 +28,8 @@ Before each prompt, and after each batch of tool calls so a long agentic
 turn can't run past it, a hook reads how much context the last turn carried. Past the
 line (150k by default), or right after a compaction, the model is asked to:
 
-1. stop at the next safe point — no new task, no browsing, builds or test runs,
-2. add a dated section to a handoff file — what's done, what's next, what
+1. stop at the next safe point: no new task, no browsing, builds or test runs,
+2. add a dated section to a handoff file with what's done, what's next, what
    was decided,
 3. give you one fenced block to paste into a new session.
 
@@ -82,7 +82,7 @@ Environment variables, all optional:
 |---|---|---|
 | `CONTEXT_LINE_LINE` | `150000` | tokens of context that trigger a nudge |
 | `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
-| `CONTEXT_LINE_HANDOFF` | — | always write the handoff to this file |
+| `CONTEXT_LINE_HANDOFF` | - | always write the handoff to this file |
 | `CONTEXT_LINE_GAP` | the cache's TTL | seconds idle before the resume guard holds a prompt back; `0` or less turns it off |
 
 On a 1M-context model you may want a higher line; on a tight plan, a lower one.
@@ -90,7 +90,7 @@ On a 1M-context model you may want a higher line; on a tight plan, a lower one.
 ## privacy
 
 Everything stays on your machine. State (one small file per nudged session)
-and the `nudges.jsonl` log hold session ids, token counts and timestamps —
+and the `nudges.jsonl` log hold session ids, token counts and timestamps,
 never prompt text. When the resume guard holds a prompt back it shows you its
 first 300 characters so you can copy them back; that text isn't stored. It all
 lives in the plugin data folder (or `~/.local/state/context-line/`); deleting
