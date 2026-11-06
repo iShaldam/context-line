@@ -12,10 +12,12 @@ nagging on turn one helps no one. Every nudge after the first in a session
 is firmer, unless the user has since told the session to keep going: then
 later nudges only note the size and don't ask it to stop.
 
-One prompt can be held back on purpose: the first one into a heavy session
-that sat idle past the prompt cache, which would re-send everything, once
-that session has already written its handoff. Sending it again goes through. Otherwise stdlib only, and any failure means silence:
-an error must never block a prompt.
+Opt in (CONTEXT_LINE_GAP) and one prompt can be held back on purpose: the
+first one into a heavy session that sat idle past the prompt cache, which
+would re-send everything, once that session has already written its handoff.
+Sending it again goes through. It's off by default since Claude Code warns on
+cold resumes and compacts idle sessions past ~200k itself. Otherwise stdlib
+only, and any failure means silence: an error must never block a prompt.
 """
 import datetime, json, os, sys, time
 
@@ -32,11 +34,24 @@ def _int_env(name, default):
         return default
 
 
+def _gap_env():
+    """The resume guard's idle gap: "ttl" (the session's cache TTL), seconds,
+    or None when it's off: unset, 0, negative or unreadable."""
+    raw = os.environ.get("CONTEXT_LINE_GAP", "").strip().lower()
+    if raw == "ttl":
+        return raw
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
 def settings():
     return {
         "line": _int_env("CONTEXT_LINE_LINE", 150000),
         "min_growth": _int_env("CONTEXT_LINE_MIN_GROWTH", 40000),
-        "gap": _int_env("CONTEXT_LINE_GAP", None),   # None: the session's cache TTL
+        "gap": _gap_env(),
     }
 
 
@@ -393,14 +408,14 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     the last call's time matches).
     """
     cfg = settings()
-    off = cfg["gap"] is not None and cfg["gap"] <= 0
-    if _headless() or not session_id or not transcript or off:
+    if _headless() or not session_id or not transcript or cfg["gap"] is None:
         return ""
     ctx, _, when = context_of(transcript)
     if when is None:
         return ""
     gap = time.time() - when
-    if gap < (cfg["gap"] or cache_ttl(transcript)) or in_flight(transcript):
+    wait = cache_ttl(transcript) if cfg["gap"] == "ttl" else cfg["gap"]
+    if gap < wait or in_flight(transcript):
         return ""
     r = _load(session_id)
     base = r.get("baseline") or baseline_of(transcript)

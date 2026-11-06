@@ -11,7 +11,7 @@ REPLAY_OVERHEAD_TOKENS adds a per-session cost for a tool's own definitions.
 import glob, json, os, sys
 from datetime import datetime
 
-LINE = 150_000
+LINE = int(os.environ.get('CONTEXT_LINE_LINE', 150_000))   # same knob as the hook
 HANDOFF = 3_000
 BIG_CHARS = int(float(os.environ.get('REPLAY_CM_KB', 10)) * 1000)
 CM_SHRINK = float(os.environ.get('REPLAY_CM_SHRINK', 0.90))
