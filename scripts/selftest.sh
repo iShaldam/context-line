@@ -40,7 +40,7 @@ plant "snapshot oldest first"    's/list(seen)\[-SNAP_FILES:\]\[::-1\]/list(seen
 plant "snapshot never mentioned" 's/if compacted and snap and os.path.exists(snap) else ""/if False else ""/'
 plant "keep going ignored"      's/^    if r.get("kept_going") and not compacted:$/    if False:/'
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
-plant "tool nudge as plain text" 's/if out and tool:/if False:/'
+plant "user never told why"     's/print(json.dumps({"systemMessage": user, /print(json.dumps({/'
 plant "batch nudge misnamed"   's/"hookEventName": event,/"hookEventName": "PostToolUse",/'
 plant "rename step dropped"     's/first: rename session <id> to/first: to/'
 plant "handed off never used"   's/otherwise \\"handed off\\"/otherwise \\"done\\"/'

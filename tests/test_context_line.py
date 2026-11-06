@@ -1,5 +1,5 @@
 """Synthetic transcripts only -- nothing here comes from a real session."""
-import contextlib, datetime, io, json, os, subprocess, sys, tempfile, time, unittest
+import contextlib, datetime, glob, io, json, os, subprocess, sys, tempfile, time, unittest
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -97,7 +97,7 @@ class Threshold(Base):
     def test_over_line_nudges(self):
         self.at(150_000)
         out = cl.check("s1", self.transcript)
-        self.assertIn("START A FRESH SESSION", out)
+        self.assertIn("time for a fresh session", out)
         self.assertIn("~150k tokens", out)
         self.assertIn("```text", out)
 
@@ -157,12 +157,12 @@ class Baseline(Base):
 
     def test_enough_growth_past_the_line_nudges(self):
         self.at(160_000, base=120_000)
-        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+        self.assertIn("time for a fresh session", cl.check("s1", self.transcript))
 
     def test_baseline_comes_from_session_start_not_tail(self):
         pad = {"type": "user", "message": {"content": "x" * (cl.TAIL + 10)}}
         self.write(usage_row(20_000), pad, usage_row(150_000), usage_row(160_000))
-        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+        self.assertIn("time for a fresh session", cl.check("s1", self.transcript))
 
     def test_min_growth_env_zero_for_canaries(self):
         os.environ["CONTEXT_LINE_LINE"] = "1000"
@@ -502,7 +502,7 @@ class KeepGoing(Base):
         out = self.nudged_then("continue")
         self.assertIn("~180k tokens", out)
         self.assertIn("chose to keep going", out)
-        self.assertNotIn("START A FRESH SESSION", out)
+        self.assertNotIn("time for a fresh session", out)
         self.assertNotIn("stop at the next safe point", out)
 
     def test_other_keep_going_words_count(self):
@@ -516,7 +516,7 @@ class KeepGoing(Base):
             with self.subTest(prompt=prompt):
                 self.tearDown(); self.setUp()
                 out = self.nudged_then(prompt)
-                self.assertIn("START A FRESH SESSION", out)
+                self.assertIn("time for a fresh session", out)
                 self.assertIn("nudge #2", out)
 
     def test_continue_before_any_nudge_changes_nothing(self):
@@ -524,7 +524,7 @@ class KeepGoing(Base):
         cl.check("s1", self.transcript, prompt="continue")
         self.assertFalse(os.path.exists(self.state_file()))
         self.at(150_000)
-        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+        self.assertIn("time for a fresh session", cl.check("s1", self.transcript))
 
     def test_the_prompt_itself_is_never_stored(self):
         self.nudged_then("continue")
@@ -534,7 +534,7 @@ class KeepGoing(Base):
         # compaction drops detail: a new reason, so the full nudge comes back
         self.nudged_then("continue")
         self.write({"isCompactSummary": True}, usage_row(20_000))
-        self.assertIn("START A FRESH SESSION", cl.check("s1", self.transcript))
+        self.assertIn("time for a fresh session", cl.check("s1", self.transcript))
 
     def test_hook_passes_the_prompt_through(self):
         self.at(150_000)
@@ -675,11 +675,12 @@ class HookCommand(Base):
     def test_stub_python3_falls_back_to_python(self):
         r = self.run_command({"python3": self.stub(), "python": sys.executable})
         self.assertEqual(r.returncode, 0)
-        self.assertTrue(r.stdout.startswith("context-line: START A FRESH SESSION"))
+        self.assertTrue(json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+                        .startswith("context-line: time for a fresh session"))
 
     def test_real_python3_runs(self):
         r = self.run_command({"python3": sys.executable})
-        self.assertIn("START A FRESH SESSION", r.stdout)
+        self.assertIn("time for a fresh session", r.stdout)
 
 
 class Snapshot(Base):
@@ -800,7 +801,7 @@ class NeverBlocks(Base):
                 mock.patch("sys.stdin", io.StringIO(json.dumps(self.prompt_payload()))), \
                 contextlib.redirect_stdout(out):
             self.assertEqual(cl.main(), 0)
-        self.assertIn("START A FRESH SESSION", out.getvalue())
+        self.assertIn("time for a fresh session", out.getvalue())
 
     @unittest.skipUnless(os.path.exists("/usr/bin/python3"), "no system python here")
     def test_system_python_parses_timestamps(self):
@@ -818,7 +819,7 @@ class NeverBlocks(Base):
                    "hook_event_name": "UserPromptSubmit", "prompt": "hi"}
         r = self.run_hook(json.dumps(payload))
         self.assertEqual(r.returncode, 0)
-        self.assertIn("START A FRESH SESSION", r.stdout)
+        self.assertIn("time for a fresh session", r.stdout)
 
     def tool_payload(self, **extra):
         return dict({"session_id": "abc123", "transcript_path": self.transcript,
@@ -834,7 +835,29 @@ class NeverBlocks(Base):
         self.assertEqual(r.returncode, 0)
         out = json.loads(r.stdout)["hookSpecificOutput"]
         self.assertEqual(out["hookEventName"], "PostToolBatch")
-        self.assertIn("START A FRESH SESSION", out["additionalContext"])
+        self.assertIn("time for a fresh session", out["additionalContext"])
+
+    def test_user_sees_why_on_prompt_and_tool_batch(self):
+        # the nudge only reaches the model; without this Claude stops for no visible reason
+        for payload in (self.prompt_payload(), self.tool_payload()):
+            self.at(160_000)
+            for f in glob.glob(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "sessions", "*")):
+                os.remove(f)
+            out = json.loads(self.run_hook(json.dumps(payload)).stdout)
+            self.assertIn("~160k in context (line 150k)", out["systemMessage"])
+            self.assertIn("handoff", out["systemMessage"])
+
+    def test_user_line_after_keep_going_says_so(self):
+        self.at(150_000)
+        cl.check("s1", self.transcript)
+        cl.check("s1", self.transcript, prompt="continue")
+        self.at(185_000)
+        _, user = cl.nudge("s1", self.transcript)
+        self.assertIn("carrying on as you asked", user)
+
+    def test_compaction_user_line(self):
+        self.write({"isCompactSummary": True}, usage_row(20_000))
+        self.assertIn("compacted", cl.nudge("s1", self.transcript)[1])
 
     def test_subagent_tool_use_is_skipped(self):
         self.at(160_000)
