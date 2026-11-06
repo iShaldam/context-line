@@ -64,7 +64,9 @@ def state_dir():
 
 
 def handoff_path(cwd, session_id):
-    """Explicit override, else the repo's HANDOFF.md, else the state dir."""
+    """Explicit override, else the repo's HANDOFF.md, else one in cwd, else
+    the state dir. Claude Code asks before writing outside the working
+    directory, so the state dir is only for a payload with no cwd."""
     override = os.environ.get("CONTEXT_LINE_HANDOFF")
     if override:
         return os.path.expanduser(override)
@@ -73,6 +75,8 @@ def handoff_path(cwd, session_id):
         if os.path.exists(os.path.join(d, ".git")):
             return os.path.join(d, "HANDOFF.md")
         d = os.path.dirname(d)
+    if cwd:
+        return os.path.join(os.path.abspath(cwd), "HANDOFF.md")
     day = datetime.date.today().isoformat()
     return os.path.join(state_dir(), "handoffs", f"{day}-{session_id[:8]}.md")
 
@@ -468,6 +472,9 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
 
 
 def main():
+    if sys.argv[1:2] == ["--where"]:   # /handoff asks, so both write the same file
+        print(handoff_path(os.getcwd(), (sys.argv[2:3] or ["handoff"])[0] or "handoff"))
+        return 0
     try:
         p = json.load(sys.stdin)
         if p.get("agent_id"):

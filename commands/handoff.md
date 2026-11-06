@@ -1,13 +1,15 @@
 ---
 description: Write a handoff for this session and give me a prompt to start a fresh one
 argument-hint: "[the one job for the next session]"
+allowed-tools: Bash(python3:*)
 ---
 
 Wrap this session up so a fresh one can pick it up with nothing lost.
 
 1. Finish or pause the current step. Do not start new work.
-2. Pick the handoff file: `HANDOFF.md` at the root of the current git repo,
-   or, outside a repo, `~/.local/state/context-line/handoffs/<today>-handoff.md`.
+2. The handoff file, the same one the nudge names:
+   !`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/context_line.py" --where "${CLAUDE_SESSION_ID}"`
+   If that line is empty, use `HANDOFF.md` at the root of the current git repo.
 3. Add a dated section to it (keep what is already there) with:
    - what is done, with file paths and commit hashes where they exist
    - what is next, in order
