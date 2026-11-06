@@ -11,5 +11,5 @@ These numbers come from replaying this machine's Claude Code transcripts
 Explain them in plain words, in at most 6 short lines: how much of the
 context sent went to turns past the line, what cutting to a fresh session at
 the line would have saved, and what cold resumes cost. Then one line on
-whether the default line (150k, `CONTEXT_LINE_LINE`) looks right for these
+whether the default growth (120k, `CONTEXT_LINE_GROWTH`) looks right for these
 sessions. Don't run anything else.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replay your own Claude Code transcripts under two what-ifs:
  - context-mode-like: big tool results (>=10KB) shrink 90%
- - context-line-like: session cut to a fresh one when context passes 150k
+ - context-line-like: session cut to a fresh one once it has grown 120k past its own first turn
 Cost units are relative to 1 uncached input token: read 0.1, write 2.0 (1h) / 1.25 (5m).
 Main-chain turns only (subagent transcripts are separate files and are skipped).
 Prints aggregates only. Env: REPLAY_SKIP=substr,substr skips project folders whose
@@ -11,7 +11,9 @@ REPLAY_OVERHEAD_TOKENS adds a per-session cost for a tool's own definitions.
 import glob, json, os, sys
 from datetime import datetime
 
-LINE = int(os.environ.get('CONTEXT_LINE_LINE', 150_000))   # same knob as the hook
+GROWTH = int(os.environ.get('CONTEXT_LINE_GROWTH', 120_000))   # same knobs as the hook
+LINE = int(os.environ.get('CONTEXT_LINE_LINE', 0))
+MIN_GROWTH = int(os.environ.get('CONTEXT_LINE_MIN_GROWTH', 40_000))
 HANDOFF = 3_000
 BIG_CHARS = int(float(os.environ.get('REPLAY_CM_KB', 10)) * 1000)
 CM_SHRINK = float(os.environ.get('REPLAY_CM_SHRINK', 0.90))
@@ -20,6 +22,11 @@ SKIP = [x for x in os.environ.get('REPLAY_SKIP', '').split(',') if x]
 IMG_TOK = 1500  # tokens per screenshot, estimate
 CPT = 3.6  # chars per token estimate for tool results
 TTL = 3600
+
+
+def heavy(ctx, base):
+    grown = ctx - base
+    return grown >= GROWTH or bool(LINE) and ctx >= LINE and grown >= MIN_GROWTH
 
 
 def ts(s):
@@ -106,7 +113,7 @@ for d in sorted(os.listdir(root)):
             tot["cost"] += c
             tot["tok"] += ctx
             tot["out"] += r["out"]
-            over = ctx > LINE
+            over = heavy(ctx, base)
             if over:
                 tot["over_turns"] += 1
                 tot["over_cost"] += c
@@ -132,7 +139,7 @@ for d in sorted(os.listdir(root)):
             tot["cm_saved"] += 0.1 * (cm_cum - new_saved) + 2.0 * new_saved
             # context-line what-if
             eff = ctx - cl_off
-            if eff > LINE:
+            if heavy(eff, base):
                 # cut: fresh session with base + handoff; one-time write of that base
                 cut = eff - (base + HANDOFF)
                 if cut > 0:
@@ -153,10 +160,11 @@ for d in sorted(os.listdir(root)):
             prev_ctx = ctx
             prev_ts = r["ts"]
 
+LINE_NAME = f"+{GROWTH//1000}k" + (f" or {LINE//1000}k" if LINE else "")
 pct = lambda a, b: f"{100 * a / b:.1f}%" if b else "n/a"
 print(f"sessions {tot['sessions']}  main-chain turns {tot['turns']:,}")
 print(f"context tokens sent (all turns): {tot['tok']/1e6:.1f}M  cost units {tot['cost']/1e6:.1f}M")
-print(f"turns above {LINE//1000}k: {tot['over_turns']:,} ({pct(tot['over_turns'], tot['turns'])} of turns), "
+print(f"turns past the line ({LINE_NAME}): {tot['over_turns']:,} ({pct(tot['over_turns'], tot['turns'])} of turns), "
       f"{pct(tot['over_tok'], tot['tok'])} of tokens, {pct(tot['over_cost'], tot['cost'])} of cost")
 print(f"tool results: {tot['allres_tokens']/1e6:.1f}M tokens entered context; "
       f"{pct(tot['bigres_tokens'], tot['allres_tokens'])} of that is in results >={BIG_CHARS//1000}KB")
@@ -164,7 +172,7 @@ print(f"screenshots (est {IMG_TOK} tok each): {tot['img_tokens']/1e6:.1f}M token
 print(f"WHAT-IF context-mode ({CM_SHRINK:.0%} off results >={BIG_CHARS//1000}KB): saves {pct(tot['cm_saved'], tot['cost'])} of cost"
       + (f", minus {pct(tot['overhead'], tot['cost'])} for its {OVERHEAD} tokens of tool definitions"
          f" = {pct(tot['cm_saved'] - tot['overhead'], tot['cost'])} net" if OVERHEAD else ""))
-print(f"WHAT-IF context-line (cut to fresh at {LINE//1000}k, {tot['cl_cuts']} cuts): saves {pct(tot['cl_saved'], tot['cost'])} of cost")
+print(f"WHAT-IF context-line (cut to fresh at {LINE_NAME}, {tot['cl_cuts']} cuts): saves {pct(tot['cl_saved'], tot['cost'])} of cost")
 print(f"cold resumes (idle >1h): {tot['cold_turns']:,} turns, {tot['cold_write_tok']/1e6:.1f}M tokens rewritten, "
       f"{pct(tot['cold_cost'], tot['cost'])} of cost; of those over the line: {tot['cold_over_turns']:,} turns, "
       f"{tot['cold_over_write_tok']/1e6:.1f}M tokens, {pct(tot['cold_over_cost'], tot['cost'])} of cost")
