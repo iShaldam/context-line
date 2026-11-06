@@ -37,7 +37,7 @@ plant "baseline ignored"        's/base = r.get("baseline") or baseline_of(trans
 plant "baseline from the tail"  's/            read = 0$/            f.seek(max(0, f.seek(0, 2) - TAIL)); read = 0/'
 plant "snapshot lists reads too" 's/^WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit")/WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit", "Read")/'
 plant "snapshot oldest first"    's/list(seen)\[-SNAP_FILES:\]\[::-1\]/list(seen)[:SNAP_FILES]/'
-plant "snapshot never mentioned" 's/if compacted and snap and os.path.exists(snap) else ""/if False else ""/'
+plant "snapshot never mentioned" 's/files = _snapped(snap) if compacted else \[\]/files = []/'
 plant "keep going ignored"      's/^    if r.get("kept_going") and not compacted:$/    if False:/'
 plant "subagents not skipped"   's/if p.get("agent_id"):/if False:/'
 plant "user never told why"     's/print(json.dumps({"systemMessage": user, /print(json.dumps({/'
