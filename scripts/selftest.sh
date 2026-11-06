@@ -26,13 +26,16 @@ if ! (cd "$tmp" && python3 -m unittest discover -s tests >/dev/null 2>&1); then
   echo "selftest: the unplanted copy fails -- no plant can be trusted"; missed=1
 fi
 rm -rf "$tmp"
+plant "growth comparison flipped" 's/if grown >= cfg\["growth"\]:/if grown < cfg["growth"]:/'
+plant "growth counted from zero" 's/    grown = ctx - base$/    grown = ctx/'
+plant "growth env ignored" 's/_int_env("CONTEXT_LINE_GROWTH", 120000)/120000/'
 plant "line comparison flipped" 's/ctx >= cfg\["line"\]/ctx < cfg["line"]/'
 plant "quiet checks save state" 's/^    if not due:$/    if _save(session_id, r) or not due:/'
 plant "session id used raw"     's/return "".join(c for c in session_id if c.isalnum() or c in "-_")/return session_id/'
 plant "renudge gap dropped"     's/ctx >= last + RENUDGE/True/'
 plant "errors escape main"      's/        pass   # silence/        raise/'
 plant "compaction ignored"      's/compacted = True$/compacted = False/'
-plant "min growth ignored"      's/ctx - base >= cfg\["min_growth"\]/True/'
+plant "min growth ignored"      's/and grown >= cfg\["min_growth"\]/and True/'
 plant "baseline ignored"        's/base = r.get("baseline") or baseline_of(transcript)/base = 0/'
 plant "baseline from the tail"  's/            read = 0$/            f.seek(max(0, f.seek(0, 2) - TAIL)); read = 0/'
 plant "snapshot lists reads too" 's/^WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit")/WRITERS = ("Edit", "Write", "MultiEdit", "NotebookEdit", "Read")/'

@@ -40,10 +40,11 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
-        env = {"CLAUDE_PLUGIN_DATA": os.path.join(self.dir, "state"),
-               "CONTEXT_LINE_LINE": "150000"}
+        env = {"CLAUDE_PLUGIN_DATA": os.path.join(self.dir, "state")}
         self.env = mock.patch.dict(os.environ, env)
         self.env.start()
+        for k in ("CONTEXT_LINE_GROWTH", "CONTEXT_LINE_LINE", "CONTEXT_LINE_MIN_GROWTH"):
+            os.environ.pop(k, None)
         os.environ.pop("CONTEXT_LINE_HANDOFF", None)
         for k in ("CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED"):
             os.environ.pop(k, None)   # the suite may itself run under claude -p
@@ -90,15 +91,15 @@ class Base(unittest.TestCase):
 
 
 class Threshold(Base):
-    def test_under_line_is_silent(self):
-        self.at(149_999)
+    def test_under_growth_is_silent(self):
+        self.at(139_999)   # +119,999 past the opening
         self.assertEqual(cl.check("s1", self.transcript), "")
 
-    def test_over_line_nudges(self):
-        self.at(150_000)
+    def test_over_growth_nudges(self):
+        self.at(140_000)
         out = cl.check("s1", self.transcript)
         self.assertIn("time for a fresh session", out)
-        self.assertIn("~150k tokens", out)
+        self.assertIn("~140k tokens", out)
         self.assertIn("```text", out)
 
     def test_nudge_says_stop_not_finish(self):
@@ -126,9 +127,27 @@ class Threshold(Base):
         out = cl.check("s1", self.transcript)
         self.assertIn("nudge #2", out)
 
-    def test_env_line_is_respected(self):
-        os.environ["CONTEXT_LINE_LINE"] = "100000"
+    def test_env_growth_is_respected(self):
+        os.environ["CONTEXT_LINE_GROWTH"] = "80000"
         self.at(100_000)
+        self.assertTrue(cl.check("s1", self.transcript))
+
+    def test_growth_follows_the_opening_size(self):
+        # the same 210k is fine for a heavy-setup session and a nudge for a light one
+        self.at(210_000, base=105_000)
+        self.assertEqual(cl.check("s1", self.transcript), "")
+        self.at(210_000, base=20_000)
+        self.assertTrue(cl.check("s2", self.transcript))
+
+    def test_user_line_says_the_growth(self):
+        self.at(210_000, base=85_000)
+        self.assertIn("~210k in context, +125k since it opened", cl.nudge("s1", self.transcript)[1])
+
+    def test_bad_growth_env_falls_back(self):
+        os.environ["CONTEXT_LINE_GROWTH"] = "lots"
+        self.at(139_999)
+        self.assertEqual(cl.check("s1", self.transcript), "")
+        self.at(140_000)
         self.assertTrue(cl.check("s1", self.transcript))
 
     def test_ignored_nudge_leaves_the_line_alone(self):
@@ -139,7 +158,7 @@ class Threshold(Base):
             cl.check("s1", self.transcript)   # the user talks past it
         self.at(175_000)
         cl.check("s1", self.transcript)   # and so does the model
-        self.at(145_000)
+        self.at(135_000)
         self.assertEqual(cl.check("s2", self.transcript), "")
 
     def test_quiet_check_writes_no_state(self):
@@ -155,9 +174,25 @@ class Baseline(Base):
         self.at(155_000, base=120_000)
         self.assertEqual(cl.check("s1", self.transcript), "")
 
-    def test_enough_growth_past_the_line_nudges(self):
-        self.at(160_000, base=120_000)
+    def test_growth_alone_nudges_without_a_line(self):
+        self.at(245_000, base=120_000)
         self.assertIn("time for a fresh session", cl.check("s1", self.transcript))
+
+    def test_line_needs_min_growth_too(self):
+        os.environ["CONTEXT_LINE_LINE"] = "150000"
+        self.at(155_000, base=120_000)   # over the line, only +35k
+        self.assertEqual(cl.check("s1", self.transcript), "")
+        self.at(160_000, base=120_000)   # +40k
+        self.assertIn("time for a fresh session", cl.check("s2", self.transcript))
+
+    def test_line_nudges_before_growth_does(self):
+        os.environ["CONTEXT_LINE_LINE"] = "150000"
+        self.at(150_000, base=100_000)   # +50k: under growth, over the line
+        self.assertTrue(cl.check("s1", self.transcript))
+
+    def test_no_line_means_no_absolute_trigger(self):
+        self.at(200_000, base=100_000)   # +100k, no line set
+        self.assertEqual(cl.check("s1", self.transcript), "")
 
     def test_baseline_comes_from_session_start_not_tail(self):
         pad = {"type": "user", "message": {"content": "x" * (cl.TAIL + 10)}}
@@ -168,6 +203,11 @@ class Baseline(Base):
         os.environ["CONTEXT_LINE_LINE"] = "1000"
         os.environ["CONTEXT_LINE_MIN_GROWTH"] = "0"
         self.write(usage_row(1_000))
+        self.assertTrue(cl.check("s1", self.transcript))
+
+    def test_growth_env_is_the_canary_knob(self):
+        os.environ["CONTEXT_LINE_GROWTH"] = "1000"
+        self.write(usage_row(20_000), usage_row(21_000))
         self.assertTrue(cl.check("s1", self.transcript))
 
 
@@ -264,11 +304,12 @@ class Gap(Base):
         self.handed_off(secs=30 * 60)
         self.assertEqual(self.guard(), "")
 
-    def test_under_line_goes_through(self):
-        self.handed_off(ctx=140_000)
+    def test_under_growth_goes_through(self):
+        self.handed_off(ctx=130_000)
         self.assertEqual(self.guard(), "")
 
     def test_under_min_growth_goes_through(self):
+        os.environ["CONTEXT_LINE_LINE"] = "150000"
         self.handed_off(ctx=160_000, base=130_000)
         self.assertEqual(self.guard(), "")
 
@@ -872,7 +913,7 @@ class NeverBlocks(Base):
             for f in glob.glob(os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "sessions", "*")):
                 os.remove(f)
             out = json.loads(self.run_hook(json.dumps(payload)).stdout)
-            self.assertIn("~160k in context (line 150k)", out["systemMessage"])
+            self.assertIn("~160k in context, +140k since it opened", out["systemMessage"])
             self.assertIn("handoff", out["systemMessage"])
 
     def test_user_line_after_keep_going_says_so(self):
