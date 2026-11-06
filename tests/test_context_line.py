@@ -204,6 +204,20 @@ class Timestamps(Base):
 class Gap(Base):
     """A heavy session idle past the prompt cache: hold the first prompt back once."""
 
+    def setUp(self):
+        super().setUp()
+        os.environ["CONTEXT_LINE_GAP"] = "ttl"   # opt-in since 0.4.0
+
+    def test_off_by_default(self):
+        # Claude Code warns on cold resumes and compacts idle sessions itself now
+        self.handed_off()
+        for value in (None, "", "nope"):
+            if value is None:
+                os.environ.pop("CONTEXT_LINE_GAP")
+            else:
+                os.environ["CONTEXT_LINE_GAP"] = value
+            self.assertEqual(self.guard(), "", value)
+
     def guard(self, **kw):
         return cl.resume_guard("s1", self.transcript, self.dir, **kw)
 
@@ -738,6 +752,10 @@ class Snapshot(Base):
 
 
 class NeverBlocks(Base):
+    def setUp(self):
+        super().setUp()
+        os.environ["CONTEXT_LINE_GAP"] = "ttl"   # so "never blocks" is tested with the guard on
+
     def run_hook(self, stdin):
         env = dict(os.environ, PATH="/usr/bin:/bin")   # hooks don't get your PATH
         return subprocess.run([sys.executable, HOOK], input=stdin, text=True,
