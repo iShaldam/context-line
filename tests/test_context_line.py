@@ -593,14 +593,40 @@ class HandoffPath(Base):
         self.assertEqual(cl.handoff_path(os.path.join(repo, "src", "deep"), "abcdef123"),
                          os.path.join(repo, "HANDOFF.md"))
 
-    def test_outside_repo_uses_state_dir(self):
-        p = cl.handoff_path(os.path.join(self.dir, "loose"), "abcdef123")
+    def test_outside_repo_uses_cwd(self):
+        # the state dir is outside the working directory, so Claude Code asked
+        # before writing there and headless runs were denied (2.1.317)
+        loose = os.path.join(self.dir, "loose")
+        self.assertEqual(cl.handoff_path(loose, "abcdef123"), os.path.join(loose, "HANDOFF.md"))
+
+    def test_no_cwd_uses_state_dir(self):
+        p = cl.handoff_path("", "abcdef123")
         self.assertTrue(p.startswith(os.environ["CLAUDE_PLUGIN_DATA"]))
         self.assertTrue(p.endswith("-abcdef12.md"))
 
     def test_override_wins(self):
         os.environ["CONTEXT_LINE_HANDOFF"] = os.path.join(self.dir, "mine.md")
         self.assertEqual(cl.handoff_path(self.dir, "x"), os.path.join(self.dir, "mine.md"))
+
+    def where(self, *args):
+        return subprocess.run([sys.executable, HOOK, "--where", *args], cwd=self.dir,
+                              text=True, capture_output=True, timeout=10).stdout.strip()
+
+    def test_where_prints_the_hooks_path(self):
+        # /handoff used to guess its own path outside a repo and ignore the override
+        self.assertEqual(self.where("abcdef123"),
+                         cl.handoff_path(os.path.realpath(self.dir), "abcdef123"))
+        os.environ["CONTEXT_LINE_HANDOFF"] = os.path.join(self.dir, "mine.md")
+        self.assertEqual(self.where("abcdef123"), os.path.join(self.dir, "mine.md"))
+
+    def test_where_without_a_session_id(self):
+        self.assertEqual(self.where(), os.path.join(os.path.realpath(self.dir), "HANDOFF.md"))
+
+    def test_handoff_command_asks_the_hook(self):
+        with open(os.path.join(ROOT, "commands", "handoff.md")) as f:
+            text = f.read()
+        self.assertIn('context_line.py" --where "${CLAUDE_SESSION_ID}"', text)
+        self.assertIn("allowed-tools: Bash(python3:*)", text)
 
 
 class State(Base):
