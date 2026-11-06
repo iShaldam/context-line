@@ -15,7 +15,10 @@ over this page.
 
 - `hooks/context_line.py`: the whole hook (python3, stdlib only).
   `hooks/hooks.json` wires it to Claude Code events.
-- `commands/handoff.md`: the `/handoff` command.
+- `commands/handoff.md`: the `/handoff` command; it asks the hook for the
+  handoff path (`context_line.py --where`) so both write the same file.
+- `commands/report.md` and `scripts/replay.py`: replay your own transcripts
+  and show what heavy sessions cost (aggregates only).
 - `.claude-plugin/`: `plugin.json` and `marketplace.json`.
 - `tests/`: `unittest` on synthetic transcripts only, never real sessions.
 - `scripts/selftest.sh`: plants known bugs and fails if the tests miss them.
@@ -44,8 +47,8 @@ new guard.
   paths, session ids or prompt text. Personal patterns for leakscan live in
   `${LEAKSCAN_PATTERNS:-~/.config/leakscan/patterns.txt}`, outside the repo;
   never copy them in.
-- Errors never block a prompt or tool call; the resume guard is the only
-  deliberate block. Keep it that way.
+- Errors never block a prompt or tool call; the opt-in resume guard is the
+  only deliberate block. Keep it that way.
 - Never read `.env` / `.env.local`, anywhere.
 - No AI attribution in commits, PRs or docs.
 - Commits: small, casual, lowercase, no trailing period, author
