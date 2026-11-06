@@ -5,9 +5,10 @@ it, and the bill for that shows up on every prompt. context-line is a plugin
 that tells you when a session has gotten heavy, writes the handoff, and gives
 you the prompt to paste into a fresh one.
 
-Every turn re-sends the whole conversation. When I replayed 45 days of my own
-sessions, half my turns ran past 150k tokens, and those turns carried 71% of
-all the context I sent.
+Every turn re-sends the whole conversation. When I replayed my own sessions
+(2,130 of them), a quarter of my turns came after a session had grown 120k
+tokens past where it started, and those turns carried 48% of all the context I
+sent.
 
 Claude Code already shows you the size (`/context`, the status line) and
 summarizes for you when it runs out (auto-compact, and idle compaction past
@@ -32,36 +33,40 @@ your context went to turns past the line, and what cutting there would have
 saved. Nothing leaves your machine. Mine:
 
 ```
-turns above 150k: 33,096 (49.4% of turns), 70.9% of tokens, 62.8% of cost
-WHAT-IF context-line (cut to fresh at 150k, 1560 cuts): saves 8.3% of cost
-cold resumes (idle >1h): 441 turns, 68.4M tokens rewritten, 8.0% of cost
+turns past the line (+120k): 17,867 (26.6% of turns), 48.1% of tokens, 42.2% of cost
+WHAT-IF context-line (cut to fresh at +120k, 456 cuts): saves 15.3% of cost
+cold resumes (idle >1h): 442 turns, 68.4M tokens rewritten, 8.0% of cost
 ```
 
 To see a nudge without waiting for a heavy session, start one with a tiny
-line and ask for anything that runs a tool:
+growth and ask for anything that runs a tool:
 
 ```
-CONTEXT_LINE_LINE=1000 CONTEXT_LINE_MIN_GROWTH=0 claude
+CONTEXT_LINE_GROWTH=1000 claude
 ```
 
 ## what it does
 
 Before each prompt, and after each batch of tool calls so a long agentic turn
-can't run past it, a hook reads how much context the last turn carried. Past
-the line (150k by default), or right after a compaction, it asks Claude to:
+can't run past it, a hook reads how much context the last turn carried. Once
+the session has grown 120k past its own first turn (`CONTEXT_LINE_GROWTH`), or
+right after a compaction, it asks Claude to:
 
 1. stop at the next safe point: no new task, no browsing, builds or test runs,
 2. add a dated section to a handoff file: what's done, what's next, what was
    decided,
 3. give you one fenced block to paste into a new session.
 
-You see one line saying why, like `context-line: ~162k in context (line 150k);
-asked Claude to wrap up and write a handoff`, so Claude never stops for no
-visible reason.
+You see one line saying why, like `context-line: ~210k in context, +125k since
+it opened; asked Claude to wrap up and write a handoff`, so Claude never stops
+for no visible reason.
 
-Only growth counts: a fresh session already carries its tools, skills and
-connectors (mine start around 80k), so there's no nudge until the session has
-grown at least 40k past its first turn.
+The trigger is growth, not an absolute number. A fresh session already carries
+its tools, skills and connectors: mine start between 80k and 110k, depending on
+what's connected. A flat 150k line is 40k of work away for a session that opens
+at 110k and 70k away for one that opens at 80k, so it nagged the heavy-setup
+sessions early and let the light ones run on. Counting from each session's own
+first turn gives every session the same room to work in.
 
 The handoff goes to `HANDOFF.md` at the root of the current git repo, or in the
 current folder when you're not in one. `/handoff` does the same wrap-up
@@ -95,10 +100,18 @@ the line is left out.
 | writes a handoff you can read and edit | no | `HANDOFF.md`, dated sections |
 | paste block for the next session | no | yes |
 
-The 150k line is a cost-and-focus heuristic, not a measured quality cliff.
-Nobody has published one for current models. It sits below Claude Code's own
-idle-compaction line, so you get the handoff before the platform summarizes
-for you.
+The 120k of growth is a cost-and-focus heuristic, not a measured quality
+cliff. Nobody has published one for current models. On a typical 80-100k
+opening it lands around 200-220k, near Claude Code's own idle-compaction line,
+so on a 200k-window model set `CONTEXT_LINE_LINE=150000` as well to get the
+handoff before the platform summarizes for you.
+
+Does it get acted on? I ran an earlier variant of this hook (a flat line, then
+this growth rule) for 42 days: 704 nudges in 505 sessions, and 316 were taken
+(the session went quiet within two prompts) against 178 ignored, 64% taken.
+Since I moved to the growth rule (11 days) nudges dropped from about 19 a day
+to 10, but the share I acted on fell too, from 67% to 44%. That is under two
+weeks of data, not a result.
 
 ## resume guard (opt-in)
 
@@ -108,7 +121,7 @@ re-sends the whole thing. With `CONTEXT_LINE_GAP=ttl` the first prompt into
 such a session is held back once, with the cost and the handoff spelled out.
 Send it again to go on.
 
-It only fires on sessions over the line that have already written their
+It only fires on sessions past the line that have already written their
 handoff, never on a prompt queued while a tool is running, and never in
 scripted runs (`claude -p`, the SDK). It's off by default since 0.4.0:
 Claude Code now warns on cold resumes and compacts idle sessions itself.
@@ -119,12 +132,13 @@ Environment variables, all optional:
 
 | variable | default | meaning |
 |---|---|---|
-| `CONTEXT_LINE_LINE` | `150000` | tokens of context that trigger a nudge |
-| `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth past the first turn needed before a nudge |
+| `CONTEXT_LINE_GROWTH` | `120000` | tokens the session has grown past its first turn before a nudge. The main knob |
+| `CONTEXT_LINE_LINE` | off | optional absolute line, for example `150000` on a 200k-window model. Nudges once the context passes it and the session has grown `CONTEXT_LINE_MIN_GROWTH` |
+| `CONTEXT_LINE_MIN_GROWTH` | `40000` | growth needed before the absolute line counts, so a session that opens big isn't nudged on turn one |
 | `CONTEXT_LINE_HANDOFF` | none | always write the handoff to this file |
 | `CONTEXT_LINE_GAP` | off | `ttl` turns the resume guard on at the session's cache TTL; a number is seconds |
 
-On a 1M-context model the window isn't the limit, cost is, so the same line
+On a 1M-context model the window isn't the limit, cost is, so the same growth
 still makes sense. On a tight plan, try a lower one.
 
 ## related tools
