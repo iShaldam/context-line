@@ -39,10 +39,11 @@ cold resumes (idle >1h): 442 turns, 68.4M tokens rewritten, 8.0% of cost
 ```
 
 To see a nudge without waiting for a heavy session, start one with a tiny
-growth and ask for anything that runs a tool:
+growth and ask for something that takes two separate tool calls (growth is
+measured between API calls, so the first call alone never trips it):
 
 ```
-CONTEXT_LINE_GROWTH=1000 claude
+CONTEXT_LINE_GROWTH=100 claude
 ```
 
 ## what it does
