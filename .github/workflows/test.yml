@@ -1,0 +1,21 @@
+name: test
+
+# unit tests, the planted-bug canary and the generic leak scan on every push
+# and pr. make validate needs the claude cli, so it stays a local check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make test selftest leakscan
