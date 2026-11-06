@@ -4,11 +4,12 @@
 Every turn re-sends the whole context, so a big session pays its size on
 every prompt. This hook runs on UserPromptSubmit and, so long agentic turns
 can't blow past the line, after each batch of tool calls (PostToolBatch). It
-reads the transcript's last usage row and, once the session crosses a line
-(or gets compacted), asks the model to stop, write a handoff and give the
-user a paste-ready prompt for a new session. Only growth since the session's
-first turn counts: a fresh session already carries its tools and skills, and
-nagging on turn one helps no one. Every nudge after the first in a session
+reads the transcript's last usage row and, once the session has grown
+CONTEXT_LINE_GROWTH (120k) past its own first turn (or gets compacted), asks the
+model to stop, write a handoff and give the user a paste-ready prompt for a new
+session. Only growth counts: a fresh session already carries its tools and
+skills, and a flat line either nags a heavy-setup session on turn one or never
+fires on a light one. CONTEXT_LINE_LINE is an optional absolute line on top. Every nudge after the first in a session
 is firmer, unless the user has since told the session to keep going: then
 later nudges only note the size and don't ask it to stop.
 
@@ -49,7 +50,8 @@ def _gap_env():
 
 def settings():
     return {
-        "line": _int_env("CONTEXT_LINE_LINE", 150000),
+        "growth": _int_env("CONTEXT_LINE_GROWTH", 120000),
+        "line": _int_env("CONTEXT_LINE_LINE", 0),   # 0 = no absolute line
         "min_growth": _int_env("CONTEXT_LINE_MIN_GROWTH", 40000),
         "gap": _gap_env(),
     }
@@ -321,20 +323,24 @@ def message(ctx, compacted, n, path, snap=""):
             f"'read {path} first', and the first next step. (3) {RENAME_STEP}{extra}")
 
 
-def shown(ctx, compacted, kept_going, line):
+def shown(ctx, compacted, kept_going, grown):
     """The one line the user sees (systemMessage), so Claude never stops for
     no visible reason."""
     if compacted:
         return "context-line: this session was compacted; asked Claude for a handoff"
     if kept_going:
         return f"context-line: ~{ctx // 1000}k in context, carrying on as you asked"
-    return (f"context-line: ~{ctx // 1000}k in context (line {line // 1000}k); "
+    return (f"context-line: ~{ctx // 1000}k in context, +{grown // 1000}k since it opened; "
             "asked Claude to wrap up and write a handoff")
 
 
 def _heavy(ctx, base, cfg):
-    """Over the line, counting only growth past the session's first turn."""
-    return ctx >= cfg["line"] and ctx - base >= cfg["min_growth"]
+    """Grown GROWTH past the session's own first turn, or (when an absolute
+    line is set) over that line with at least MIN_GROWTH of growth."""
+    grown = ctx - base
+    if grown >= cfg["growth"]:
+        return True
+    return bool(cfg["line"]) and ctx >= cfg["line"] and grown >= cfg["min_growth"]
 
 
 def check(session_id, transcript, cwd="", prompt=""):
@@ -372,9 +378,9 @@ def nudge(session_id, transcript, cwd="", prompt=""):
     if compacted:
         r["nudged_compact"] = True
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
-          "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
+          "ctx": ctx, "compacted": compacted, "base": base, "growth": cfg["growth"], "n": n})
     _save(session_id, r)
-    user = shown(ctx, compacted, r.get("kept_going"), cfg["line"])
+    user = shown(ctx, compacted, r.get("kept_going"), ctx - base)
     if r.get("kept_going") and not compacted:
         return note(ctx), user
     return message(ctx, compacted, n, handoff_path(cwd, session_id), r.get("snapshot", "")), user
