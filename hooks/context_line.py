@@ -297,12 +297,24 @@ def message(ctx, compacted, n, path, snap=""):
     extra = (f" (4) The compaction dropped detail: {snap} lists the files this session "
              "edited, saved just before it; read it and fold it into that section."
              if compacted and snap and os.path.exists(snap) else "")
-    return (f"context-line: START A FRESH SESSION. {why}. {tone}: stop at the next safe "
+    return (f"context-line: time for a fresh session. The user installed context-line to "
+            f"be told when a session gets heavy: {why}. {tone}: stop at the next safe "
             "point -- no new task and no tool-heavy steps (browsing, big reads, builds, test "
             f"runs). Then (1) add a dated section to {path} with what is done, what is next "
             "and any decisions made, keeping what is already there, (2) end with exactly ONE "
             "fenced ```text block for the user to paste into a new session: the one job, "
             f"'read {path} first', and the first next step. (3) {RENAME_STEP}{extra}")
+
+
+def shown(ctx, compacted, kept_going, line):
+    """The one line the user sees (systemMessage), so Claude never stops for
+    no visible reason."""
+    if compacted:
+        return "context-line: this session was compacted; asked Claude for a handoff"
+    if kept_going:
+        return f"context-line: ~{ctx // 1000}k in context, carrying on as you asked"
+    return (f"context-line: ~{ctx // 1000}k in context (line {line // 1000}k); "
+            "asked Claude to wrap up and write a handoff")
 
 
 def _heavy(ctx, base, cfg):
@@ -311,14 +323,20 @@ def _heavy(ctx, base, cfg):
 
 
 def check(session_id, transcript, cwd="", prompt=""):
-    """Return an instruction for the model, or '' when the session is fine.
+    """The instruction for the model, or '' when the session is fine."""
+    return nudge(session_id, transcript, cwd, prompt)[0]
+
+
+def nudge(session_id, transcript, cwd="", prompt=""):
+    """(instruction for the model, line for the user), or ('', '') when the
+    session is fine.
 
     A check that doesn't nudge writes nothing, except the kept_going flag
     when the user answers a nudge with "continue" (a flag only, never the
     prompt).
     """
     if not session_id or not transcript:
-        return ""
+        return "", ""
     cfg = settings()
     r = _load(session_id)
     if r.get("nudges") and not r.get("kept_going") and keeps_going(prompt):
@@ -330,7 +348,7 @@ def check(session_id, transcript, cwd="", prompt=""):
     due = (compacted and not r.get("nudged_compact")) or (
         _heavy(ctx, base, cfg) and (last is None or ctx >= last + RENUDGE))
     if not due:
-        return ""
+        return "", ""
 
     n = r.get("nudges", 0) + 1
     r.update(nudges=n, nudged_at=time.time(), nudge_ctx=ctx)
@@ -341,9 +359,10 @@ def check(session_id, transcript, cwd="", prompt=""):
     _log({"ts": time.time(), "session": session_id, "event": "nudge",
           "ctx": ctx, "compacted": compacted, "line": cfg["line"], "n": n})
     _save(session_id, r)
+    user = shown(ctx, compacted, r.get("kept_going"), cfg["line"])
     if r.get("kept_going") and not compacted:
-        return note(ctx)
-    return message(ctx, compacted, n, handoff_path(cwd, session_id), r.get("snapshot", ""))
+        return note(ctx), user
+    return message(ctx, compacted, n, handoff_path(cwd, session_id), r.get("snapshot", "")), user
 
 
 def _ago(secs):
@@ -468,13 +487,13 @@ def main():
             if reason:   # held back once; the same prompt sent again goes through
                 print(json.dumps({"decision": "block", "reason": reason}))
                 return 0
+        if not (tool or event == "UserPromptSubmit"):
+            return 0
         prompt = (p.get("prompt") or "") if event == "UserPromptSubmit" else ""
-        out = check(sid, transcript, cwd, prompt)
-        if out and tool:   # plain stdout only reaches the model on UserPromptSubmit
-            out = json.dumps({"hookSpecificOutput": {
-                "hookEventName": event, "additionalContext": out}})
-        if out:
-            print(out)
+        out, user = nudge(sid, transcript, cwd, prompt)
+        if out:   # the model gets the instruction, the user one line saying why
+            print(json.dumps({"systemMessage": user, "hookSpecificOutput": {
+                "hookEventName": event, "additionalContext": out}}))
     except Exception:
         pass   # silence over a blocked prompt, always
     return 0
