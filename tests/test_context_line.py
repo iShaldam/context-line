@@ -748,12 +748,14 @@ class Snapshot(Base):
         self.at(50_000)
         self.assertEqual(cl.snapshot("s1", self.transcript), "")
 
-    def test_compaction_nudge_points_at_the_snapshot(self):
-        self.touched("/r/a.py")
+    def test_compaction_nudge_lists_the_snapshot(self):
+        # inlined, not a path: the state dir is outside the working directory
+        self.touched("/r/a.py", "/r/b.py")
         snap = cl.snapshot("s1", self.transcript)
         self.write({"isCompactSummary": True}, usage_row(20_000))
         out = cl.check("s1", self.transcript)
-        self.assertIn(snap, out)
+        self.assertIn("/r/b.py, /r/a.py", out)
+        self.assertNotIn(snap, out)
 
     def test_compaction_nudge_without_snapshot_is_unchanged(self):
         self.write({"isCompactSummary": True}, usage_row(20_000))

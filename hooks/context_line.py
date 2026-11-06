@@ -276,6 +276,16 @@ def snapshot(session_id, transcript):
     return path
 
 
+def _snapped(path):
+    """The file list a snapshot saved, inlined into the nudge: the state dir is
+    outside the working directory, so pointing Claude at it costs a prompt."""
+    try:
+        with open(path) as f:
+            return [l[2:].strip() for l in f if l.startswith("- ")]
+    except (OSError, TypeError):
+        return []
+
+
 def keeps_going(prompt):
     """True for a short prompt that tells the session to go on, like
     "continue" or "keep going". A question or a longer ask never counts."""
@@ -298,9 +308,10 @@ def message(ctx, compacted, n, path, snap=""):
            if compacted else f"this session carries ~{ctx // 1000}k tokens, re-sent every turn")
     tone = ("Say it plainly before anything else" if n == 1
             else f"This is nudge #{n} and the session kept going -- lead with it, firmly")
-    extra = (f" (4) The compaction dropped detail: {snap} lists the files this session "
-             "edited, saved just before it; read it and fold it into that section."
-             if compacted and snap and os.path.exists(snap) else "")
+    files = _snapped(snap) if compacted else []
+    extra = (" (4) The compaction dropped detail. The files this session edited, newest "
+             f"first, saved just before it: {', '.join(files)}. Fold them into that section."
+             if files else "")
     return (f"context-line: time for a fresh session. The user installed context-line to "
             f"be told when a session gets heavy: {why}. {tone}: stop at the next safe "
             "point -- no new task and no tool-heavy steps (browsing, big reads, builds, test "
