@@ -15,6 +15,8 @@ Tags are plain `vX.Y.Z` from 0.5.0 on. Older releases were tagged
 - The opt-in resume guard reads `prompt_cache_likely_expired`, `context_tokens`
   and `estimated_cache_write_usd` from `SessionStart` on Claude Code 2.1.251+,
   and shows the re-cache cost. Older versions keep the transcript TTL estimate.
+- Optional `statusline.sh` shows growth since the session opened against the
+  line, using the hook's own transcript parsing.
 
 ## 0.5.0 (2026-11-20)
 
