@@ -12,6 +12,9 @@ Tags are plain `vX.Y.Z` from 0.5.0 on. Older releases were tagged
 - Docs say `/context-line:handoff`; related tools name session-report and
   claude-code-tools; added CONTRIBUTING.md and SECURITY.md.
 - Dependabot auto-merge waits for the test and zizmor checks itself.
+- The opt-in resume guard reads `prompt_cache_likely_expired`, `context_tokens`
+  and `estimated_cache_write_usd` from `SessionStart` on Claude Code 2.1.251+,
+  and shows the re-cache cost. Older versions keep the transcript TTL estimate.
 
 ## 0.5.0 (2026-11-20)
 

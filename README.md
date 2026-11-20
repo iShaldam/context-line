@@ -130,6 +130,17 @@ re-sends the whole thing. With `CONTEXT_LINE_GAP=ttl` the first prompt into
 such a session is held back once, with the cost and the handoff spelled out.
 Send it again to go on.
 
+On Claude Code 2.1.251 and later, a resumed session tells the hook itself
+whether its prompt cache likely expired, how many tokens the first request
+re-sends and what re-caching them costs (`prompt_cache_likely_expired`,
+`context_tokens`, `estimated_cache_write_usd` on `SessionStart`). The guard
+uses those when they're there, so the held-back message carries Claude Code's
+own token count and dollar estimate, and it also fires when the cache was
+dropped early (a compaction, a shorter cache). It keeps counting idle time from
+the transcript too, so a session that resumed warm and then sat for an hour
+still gets caught. On older versions, or a session left open instead of
+resumed, it estimates the cache lifetime from the transcript as before.
+
 It only fires on sessions past the line that have already written their
 handoff, never on a prompt queued while a tool is running, and never in
 scripted runs (`claude -p`, the SDK). It's off by default since 0.4.0:
