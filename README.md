@@ -16,11 +16,12 @@ about 200k). It doesn't stop at a safe point and leave you a handoff you can
 read. That's the part this plugin does.
 
 ![A real session with CONTEXT_LINE_GROWTH=100: after the second tool call the
-hook shows one line saying why, Claude stops before the edit, appends to
-HANDOFF.md and prints the block to paste into a new session](docs/nudge.gif)
+hook shows one line saying why, Claude stops before the edit and starts
+writing HANDOFF.md](docs/nudge.gif)
 
 A real run with `CONTEXT_LINE_GROWTH=100`, so it trips after two tool calls
-instead of 120k in: the one-line nudge, the handoff, and the block to paste.
+instead of 120k in: the one-line nudge, then Claude stopping to write the
+handoff.
 
 ## install
 
