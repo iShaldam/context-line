@@ -1,0 +1,48 @@
+name: claude code watch
+
+# weekly: re-check the hooks doc sections, usage fields and changelog lines
+# the hook leans on (scripts/watch.py), and open one issue when any moved.
+# after checking the hook against them, run `python3 scripts/watch.py update`
+# and commit watch.json to move the baseline
+
+on:
+  schedule:
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: check
+        run: |
+          set +e
+          python3 scripts/watch.py check > watch.out
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+      - if: steps.check.outputs.code == '2'
+        run: exit 1
+      - if: steps.check.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -n "$(gh issue list --state open --search 'claude code moved in:title' --json number --jq '.[].number')" ]; then
+            exit 0
+          fi
+          {
+            echo "Something the hook reads moved. Check the hook against each line, then run \`python3 scripts/watch.py update\` and commit watch.json."
+            echo
+            echo '```'
+            cat watch.out
+            echo '```'
+          } > issue.md
+          gh issue create --title "claude code moved under the hook" --body-file issue.md

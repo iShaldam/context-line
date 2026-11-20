@@ -1,0 +1,10 @@
+{
+  "changelog": "2.1.329",
+  "sections": {
+    "Common input fields": "a9559bee0baf6abd",
+    "JSON output": "33062e316d1d38d8",
+    "UserPromptSubmit": "906d5816fecf831b",
+    "PostToolBatch": "4f9e6d79149103d5",
+    "PreCompact": "e06913ad34864fbc"
+  }
+}
