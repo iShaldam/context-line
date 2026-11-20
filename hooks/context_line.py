@@ -516,9 +516,35 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     return reason
 
 
+def status(p):
+    """The status line: growth since the session opened against the line, read
+    the same way the nudge reads it, so the two never disagree. '' before the
+    first API call or when the transcript can't be read."""
+    sid, transcript = p.get("session_id"), p.get("transcript_path")
+    if not sid or not transcript:
+        return ""
+    ctx = context_of(transcript)[0]
+    base = _load(sid).get("baseline") or baseline_of(transcript)
+    if not ctx or not base:
+        return ""
+    cfg = settings()
+    grown, line = ctx - base, cfg["growth"] // 1000
+    if _heavy(ctx, base, cfg):
+        return f"context-line: +{grown // 1000}k since open, past the line at +{line}k"
+    return f"context-line: +{max(grown, 0) // 1000}k since open / line at +{line}k"
+
+
 def main():
     if sys.argv[1:2] == ["--where"]:   # /handoff asks, so both write the same file
         print(handoff_path(os.getcwd(), (sys.argv[2:3] or ["handoff"])[0] or "handoff"))
+        return 0
+    if sys.argv[1:2] == ["--status"]:   # statusline.sh: optional, never an error
+        try:
+            out = status(json.load(sys.stdin))
+        except Exception:
+            out = ""
+        if out:
+            print(out)
         return 0
     try:
         p = json.load(sys.stdin)

@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 missed=0
 fresh() {  # a scratch copy of everything the tests read
   tmp="$(mktemp -d)"
-  cp -R "$root/hooks" "$root/tests" "$root/commands" "$root/scripts" "$tmp/"
+  cp -R "$root/hooks" "$root/tests" "$root/commands" "$root/scripts" "$root/statusline.sh" "$tmp/"
 }
 plant() {  # name, sed expression
   fresh
@@ -80,5 +80,9 @@ plant "resume verdict from an old call" 's/if (r.get("resume") or {}).get("when"
 plant "resume verdict wins over idling" 's/if not (said_cold or gap >= wait)/if not (said_cold if known else gap >= wait)/'
 plant "resume cost not shown"   's/gap_reason(known.get("ctx") or ctx, gap, path, prompt, known.get("usd"))/gap_reason(ctx, gap, path, prompt)/'
 plant "resume kept with guard off" 's/ or settings()\["gap"\] is None$//'
+plant "status counts from zero"  's/    grown, line = ctx - base, /    grown, line = ctx, /'
+plant "status ignores the hook baseline" 's/    base = _load(sid).get("baseline") or baseline_of(transcript)/    base = baseline_of(transcript)/'
+plant "status past the line on its own rule" 's/    if _heavy(ctx, base, cfg):/    if grown > cfg["growth"]:/'
+plant "status errors escape"    's/            out = status(json.load(sys.stdin))/            out = status(json.load(sys.stdin)); 1 \/ 0/'
 plant "prompt stored on resend" 's/handoff=wrap)/handoff=wrap, prompt=prompt)/'
 exit $missed

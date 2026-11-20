@@ -626,6 +626,88 @@ class ResumeFields(Base):
         self.assertEqual(sorted(self.state()["resume"]), ["ctx", "expired", "usd", "when"])
 
 
+class StatusLine(Base):
+    """statusline.sh / --status: growth since open against the line, read the
+    same way the nudge reads it."""
+
+    def payload(self, sid="s1"):
+        # the fields the status line command gets on stdin that this reads
+        return {"session_id": sid, "transcript_path": self.transcript,
+                "context_window": {"used_percentage": 8}}
+
+    def test_under_the_line(self):
+        self.at(58_000)
+        self.assertEqual(cl.status(self.payload()),
+                         "context-line: +38k since open / line at +120k")
+
+    def test_past_the_line_matches_a_nudge(self):
+        self.at(145_000)
+        self.assertEqual(cl.status(self.payload()),
+                         "context-line: +125k since open, past the line at +120k")
+        self.assertTrue(cl.check("s1", self.transcript))   # the hook agrees
+
+    def test_one_under_the_line_and_the_hook_stays_quiet(self):
+        self.at(139_999)
+        self.assertIn("/ line at +120k", cl.status(self.payload()))
+        self.assertEqual(cl.check("s1", self.transcript), "")
+
+    def test_exactly_at_the_line_is_past_it_like_the_hook(self):
+        self.at(140_000)
+        self.assertIn("past the line", cl.status(self.payload()))
+        self.assertTrue(cl.check("s1", self.transcript))
+
+    def test_absolute_line_counts_too(self):
+        os.environ["CONTEXT_LINE_LINE"] = "150000"
+        self.at(160_000, base=100_000)   # +60k: under the growth, over the line
+        self.assertIn("past the line", cl.status(self.payload()))
+        self.assertTrue(cl.check("s1", self.transcript))
+
+    def test_growth_env_moves_the_line(self):
+        os.environ["CONTEXT_LINE_GROWTH"] = "80000"
+        self.at(60_000)
+        self.assertEqual(cl.status(self.payload()),
+                         "context-line: +40k since open / line at +80k")
+
+    def test_uses_the_baseline_the_hook_saved(self):
+        self.at(160_000)
+        cl.check("s1", self.transcript)   # nudges, saves baseline 20k
+        r = self.state()
+        r["baseline"] = 50_000            # as if the head had moved since
+        cl._save("s1", r)
+        self.assertIn("+110k since open / line", cl.status(self.payload()))
+
+    def test_shrunk_after_compaction_shows_zero(self):
+        self.write(usage_row(60_000), {"isCompactSummary": True}, usage_row(30_000))
+        self.assertEqual(cl.status(self.payload()),
+                         "context-line: +0k since open / line at +120k")
+
+    def test_nothing_before_the_first_call(self):
+        self.write({"type": "user", "message": {"content": "hi"}})
+        self.assertEqual(cl.status(self.payload()), "")
+        self.assertEqual(cl.status({}), "")
+        self.assertEqual(cl.status(dict(self.payload(), transcript_path=self.dir + "/gone")), "")
+
+    def test_reading_writes_no_state(self):
+        self.at(160_000)
+        cl.status(self.payload())
+        self.assertFalse(os.path.exists(self.state_file()))
+
+    def script(self, stdin):
+        return subprocess.run(["sh", os.path.join(ROOT, "statusline.sh")], input=stdin,
+                              text=True, capture_output=True, timeout=10)
+
+    def test_script_prints_one_line(self):
+        self.at(58_000)
+        r = self.script(json.dumps(self.payload()))
+        self.assertEqual((r.returncode, r.stdout, r.stderr),
+                         (0, "context-line: +38k since open / line at +120k\n", ""))
+
+    def test_script_is_silent_on_garbage(self):
+        for stdin in ("", "not json", "[]"):
+            r = self.script(stdin)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), stdin)
+
+
 class KeepGoing(Base):
     """After a nudge the user may tell the session to keep going. Later
     growth nudges still give the size but stop asking it to stop."""
