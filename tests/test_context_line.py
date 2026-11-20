@@ -690,12 +690,19 @@ class State(Base):
 
 
 class HookCommand(Base):
-    """hooks.json: a missing or stub python3 must not be a hook error on every call."""
+    """hooks.json and run.sh: a missing or stub python3 must not be a hook error on every call."""
 
     def hooks(self):
         with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
             return [h for groups in json.load(f)["hooks"].values()
                     for g in groups for h in g["hooks"]]
+
+    def test_every_hook_is_just_the_script_path(self):
+        # the plugin directory blocks inline loops, command substitution and
+        # variables other than the plugin root in a hook command
+        self.assertEqual({h["command"] for h in self.hooks()},
+                         {'"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh"'})
+        self.assertTrue(os.access(os.path.join(ROOT, "hooks", "run.sh"), os.X_OK))
 
     def test_every_hook_has_a_short_timeout(self):
         self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5, 5])
@@ -708,7 +715,7 @@ class HookCommand(Base):
         self.assertNotIn("matcher", events["PostToolBatch"][0])   # the event takes none
 
     def run_command(self, pythons):
-        """Run the hooks.json command with only `pythons` ({name: target}) on PATH."""
+        """Run the hooks.json command (run.sh) with only `pythons` ({name: target}) on PATH."""
         import shutil
         bin_ = os.path.join(self.dir, "bin")
         os.makedirs(bin_)
