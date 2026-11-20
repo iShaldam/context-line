@@ -182,4 +182,8 @@ make check      # manifest validation, tests, and a canary that plants bugs
 make leakscan   # run before any push
 ```
 
+A weekly job (`scripts/watch.py`) re-reads the hooks doc sections, usage
+fields and changelog lines the hook depends on, and opens an issue when one
+moves, since a format change would only make the hook go quiet.
+
 MIT licensed.

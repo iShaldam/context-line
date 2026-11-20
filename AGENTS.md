@@ -24,6 +24,9 @@ over this page.
 - `tests/`: `unittest` on synthetic transcripts only, never real sessions.
 - `scripts/selftest.sh`: plants known bugs and fails if the tests miss them.
 - `scripts/leakscan.sh`: blocks home paths, keys and personal patterns.
+- `scripts/watch.py` and `watch.json`: the weekly check that the hooks doc,
+  usage fields and changelog haven't moved under the hook
+  (`.github/workflows/watch.yml`).
 
 ## Toolchain
 
