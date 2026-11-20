@@ -14,7 +14,8 @@ over this page.
 ## Layout
 
 - `hooks/context_line.py`: the whole hook (python3, stdlib only).
-  `hooks/hooks.json` wires it to Claude Code events.
+  `hooks/hooks.json` wires it to Claude Code events through `hooks/run.sh`,
+  which picks a python and stays silent without one.
 - `commands/handoff.md`: the `/handoff` command; it asks the hook for the
   handoff path (`context_line.py --where`) so both write the same file.
 - `commands/report.md` and `scripts/replay.py`: replay your own transcripts
