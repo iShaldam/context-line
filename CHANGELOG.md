@@ -3,7 +3,7 @@
 Tags are plain `vX.Y.Z` from 0.5.0 on. Older releases were tagged
 `context-line--vX.Y.Z` (the `claude plugin tag` default) and keep those tags.
 
-## Unreleased
+## 0.6.0 (2026-11-20)
 
 - Hooks call `hooks/run.sh` instead of an inline shell loop, so the plugin
   directory's hook check passes. Same python fallback, same silence without one.
@@ -17,6 +17,8 @@ Tags are plain `vX.Y.Z` from 0.5.0 on. Older releases were tagged
   and shows the re-cache cost. Older versions keep the transcript TTL estimate.
 - Optional `statusline.sh` shows growth since the session opened against the
   line, using the hook's own transcript parsing.
+- The README shows a gif of a real nudge, from the tripped hook to Claude
+  stopping to write the handoff.
 
 ## 0.5.0 (2026-11-20)
 
