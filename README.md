@@ -146,6 +146,50 @@ handoff, never on a prompt queued while a tool is running, and never in
 scripted runs (`claude -p`, the SDK). It's off by default since 0.4.0:
 Claude Code now warns on cold resumes and compacts idle sessions itself.
 
+## status line (optional)
+
+The nudge fires on growth, and Claude Code's own status line shows absolute
+size, so the number that matters isn't on screen until the nudge. `statusline.sh`
+puts it there:
+
+```
+context-line: +38k since open / line at +120k
+context-line: +125k since open, past the line at +120k
+```
+
+It reads the transcript with the same code as the hook, from the same first
+turn, so the two never disagree. It writes nothing, and prints nothing before
+the first reply or when python is missing.
+
+Claude Code doesn't let a plugin set your status line, so add it to
+`~/.claude/settings.json` yourself. The marketplace clone has a stable path
+that updates with the plugin:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "sh ~/.claude/plugins/marketplaces/context-line/statusline.sh"
+  }
+}
+```
+
+Already using [claude-hud](https://github.com/jarrodwatts/claude-hud),
+[ccstatusline](https://github.com/sirmalloc/ccstatusline) or your own script?
+Keep it and print this as a second line. The status line shows every line a
+command prints, and both commands need the same JSON on stdin, so save it once
+and hand it to each (put your current command on the first `printf` line):
+
+```sh
+#!/bin/sh
+# ~/.claude/statusline-both.sh, then point "command" at it
+i=$(cat)
+printf %s "$i" | npx -y ccstatusline@latest
+printf %s "$i" | sh ~/.claude/plugins/marketplaces/context-line/statusline.sh
+```
+
+In ccstatusline you can also add it as a Custom Command widget instead.
+
 ## settings
 
 Environment variables, all optional:

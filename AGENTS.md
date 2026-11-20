@@ -16,6 +16,8 @@ over this page.
 - `hooks/context_line.py`: the whole hook (python3, stdlib only).
   `hooks/hooks.json` wires it to Claude Code events through `hooks/run.sh`,
   which picks a python and stays silent without one.
+- `statusline.sh`: the optional status line; it runs `context_line.py
+  --status`, so it reads growth exactly the way the nudge does.
 - `commands/handoff.md`: the `/context-line:handoff` command; it asks the hook for the
   handoff path (`context_line.py --where`) so both write the same file.
 - `commands/report.md` and `scripts/replay.py`: replay your own transcripts
