@@ -528,10 +528,11 @@ def status(p):
     if not ctx or not base:
         return ""
     cfg = settings()
-    grown, line = ctx - base, cfg["growth"] // 1000
+    grown, g = ctx - base, cfg["growth"]
+    line = f"{g // 1000}k" if g >= 1000 else str(g)   # a demo's tiny line isn't +0k
     if _heavy(ctx, base, cfg):
-        return f"context-line: +{grown // 1000}k since open, past the line at +{line}k"
-    return f"context-line: +{max(grown, 0) // 1000}k since open / line at +{line}k"
+        return f"context-line: +{grown // 1000}k since open, past the line at +{line}"
+    return f"context-line: +{max(grown, 0) // 1000}k since open / line at +{line}"
 
 
 def main():

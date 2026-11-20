@@ -668,6 +668,12 @@ class StatusLine(Base):
         self.assertEqual(cl.status(self.payload()),
                          "context-line: +40k since open / line at +80k")
 
+    def test_tiny_demo_line_is_not_zero_k(self):
+        os.environ["CONTEXT_LINE_GROWTH"] = "100"
+        self.at(25_000)
+        self.assertEqual(cl.status(self.payload()),
+                         "context-line: +5k since open, past the line at +100")
+
     def test_uses_the_baseline_the_hook_saved(self):
         self.at(160_000)
         cl.check("s1", self.transcript)   # nudges, saves baseline 20k
