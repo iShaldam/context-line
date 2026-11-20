@@ -1,3 +1,0 @@
-# plugin.json is ahead of the last tag on purpose until this version ships.
-# make check fails if this file is still here after the tag
-0.5.0
