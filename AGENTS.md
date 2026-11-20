@@ -2,8 +2,8 @@
 
 context-line is a Claude Code plugin: a hook that nudges a session toward a
 handoff before its context gets expensive, a resume guard for idle sessions,
-and the `/handoff` command. `README.md` covers what it does and its settings;
-this page is what an agent needs to change the plugin itself.
+and the `/context-line:handoff` command. `README.md` covers what it does and
+its settings; this page is what an agent needs to change the plugin itself.
 
 ## Rules live in the owner's rules repo
 
@@ -16,7 +16,7 @@ over this page.
 - `hooks/context_line.py`: the whole hook (python3, stdlib only).
   `hooks/hooks.json` wires it to Claude Code events through `hooks/run.sh`,
   which picks a python and stays silent without one.
-- `commands/handoff.md`: the `/handoff` command; it asks the hook for the
+- `commands/handoff.md`: the `/context-line:handoff` command; it asks the hook for the
   handoff path (`context_line.py --where`) so both write the same file.
 - `commands/report.md` and `scripts/replay.py`: replay your own transcripts
   and show what heavy sessions cost (aggregates only).
