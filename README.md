@@ -70,8 +70,9 @@ sessions early and let the light ones run on. Counting from each session's own
 first turn gives every session the same room to work in.
 
 The handoff goes to `HANDOFF.md` at the root of the current git repo, or in the
-current folder when you're not in one. `/handoff` does the same wrap-up
-whenever you want it, and writes to the same file.
+current folder when you're not in one. `/context-line:handoff` does the same
+wrap-up whenever you want it, and writes to the same file. Plain `/handoff`
+works too, unless another plugin also has a `/handoff`.
 
 Keep going past a nudge and the next one comes 30k later, firmer. Answer a
 nudge with "continue" (or "keep going", "go on", "carry on", "proceed") and
