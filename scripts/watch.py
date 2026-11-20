@@ -23,10 +23,11 @@ HOOKS_DOC = "https://code.claude.com/docs/en/hooks.md"
 CACHE_DOC = "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md"
 CHANGELOG = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
 SECTIONS = ("Common input fields", "JSON output", "UserPromptSubmit",
-            "PostToolBatch", "PreCompact")
+            "PostToolBatch", "PreCompact", "SessionStart")
 FIELDS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
           "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
-TERMS = re.compile(r"UserPromptSubmit|PostToolBatch|PreCompact|hookSpecificOutput|"
+TERMS = re.compile(r"UserPromptSubmit|PostToolBatch|PreCompact|SessionStart|"
+                   r"prompt_cache_likely_expired|hookSpecificOutput|"
                    r"additionalContext|systemMessage|CLAUDE_PLUGIN_(ROOT|DATA)|"
                    r"transcript (file|format)|\.jsonl|isCompactSummary|"
                    r"cache_(read|creation)|hook (input|output)")

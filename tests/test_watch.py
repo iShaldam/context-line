@@ -19,6 +19,9 @@ prompt
 once per batch
 ### PreCompact
 before a compact
+### SessionStart
+#### SessionStart input
+prompt_cache_likely_expired, context_tokens, estimated_cache_write_usd
 ### PostCompact
 after
 """
