@@ -1,6 +1,6 @@
-.PHONY: check test selftest validate leakscan
+.PHONY: check release test selftest validate leakscan
 
-check: validate test selftest
+check: validate test selftest release
 
 validate:
 	claude plugin validate --strict .
@@ -14,3 +14,6 @@ selftest:
 
 leakscan:
 	bash scripts/leakscan.sh
+
+release:
+	sh scripts/release-check.sh
