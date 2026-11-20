@@ -61,7 +61,8 @@ new guard.
 - `HANDOFF.md` is local notes, excluded from git. Never commit it.
 - Claim the repo on the owner's handoff board (`handoff/parked.md` in the
   rules repo) before editing.
-- Releases (`claude plugin tag .`, pushed tags) are the owner's call.
+- Releases (pushed tags) are the owner's call. Tags are plain `vX.Y.Z`;
+  each release gets a section in `CHANGELOG.md`.
 
 ## Cloud session caveats
 
