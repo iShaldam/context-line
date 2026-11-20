@@ -417,12 +417,14 @@ def _wrote(transcript, path, since):
     return False
 
 
-def gap_reason(ctx, gap, path, prompt=""):
+def gap_reason(ctx, gap, path, prompt="", usd=None):
     """What the held-back prompt would cost, pointing at this session's own
-    handoff at path. Shown to the user, never the model."""
+    handoff at path. usd is Claude Code's own re-cache estimate, when it gave
+    one. Shown to the user, never the model."""
     k = ctx // 1000
+    cost = f" (about ${usd:.2f} to re-cache)" if usd else ""
     out = (f"context-line: not sent. This session carries ~{k}k and sat idle {_ago(gap)}, "
-           f"past the prompt cache, so this prompt would re-send all {k}k. Cheaper: "
+           f"past the prompt cache, so this prompt would re-send all {k}k{cost}. Cheaper: "
            f"start a new session and read {path} "
            f"(updated {_ago(time.time() - os.path.getmtime(path))} ago). "
            "To go on here, send it again.")
@@ -436,6 +438,26 @@ def _headless():
     CLAUDE_CODE_SESSION_ATTENDED is undocumented, so it's only a hint."""
     return (os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")
             or os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0")
+
+
+def remember_resume(session_id, transcript, p):
+    """SessionStart on a resume or fork: Claude Code 2.1.251+ says itself
+    whether the prompt cache likely expired, what the first request re-sends
+    and what re-caching it costs. Keep that, tied to the last API call's time,
+    for the guard on the first prompt. Older versions send none of it, and the
+    guard falls back to estimating the TTL from the transcript."""
+    if (_headless() or not session_id or not transcript or settings()["gap"] is None
+            or "prompt_cache_likely_expired" not in p):
+        return
+    when = context_of(transcript)[2]
+    if when is None:
+        return
+    usd = p.get("estimated_cache_write_usd")
+    r = _load(session_id)
+    r["resume"] = {"when": when, "expired": p["prompt_cache_likely_expired"] is True,
+                   "ctx": int(p.get("context_tokens") or 0),
+                   "usd": usd if isinstance(usd, (int, float)) else None}
+    _save(session_id, r)
 
 
 def resume_guard(session_id, transcript, cwd="", prompt=""):
@@ -454,10 +476,15 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     if when is None:
         return ""
     gap = time.time() - when
-    wait = cache_ttl(transcript) if cfg["gap"] == "ttl" else cfg["gap"]
-    if gap < wait or in_flight(transcript):
-        return ""
     r = _load(session_id)
+    # what Claude Code said at this resume, if it's still about the same last
+    # call. Its verdict was true at resume time; idling on after the resume can
+    # still run the cache out, so the transcript's TTL estimate keeps counting.
+    known = r.get("resume") if (r.get("resume") or {}).get("when") == when else None
+    wait = cache_ttl(transcript) if cfg["gap"] == "ttl" else cfg["gap"]
+    said_cold = bool(known and known.get("expired") and cfg["gap"] == "ttl")
+    if not (said_cold or gap >= wait) or in_flight(transcript):
+        return ""
     base = r.get("baseline") or baseline_of(transcript)
     if not _heavy(ctx, base, cfg):
         return ""
@@ -481,7 +508,8 @@ def resume_guard(session_id, transcript, cwd="", prompt=""):
     if not (_wrote(transcript, path, since) and os.path.exists(path)
             and os.path.getmtime(path) >= since):
         return ""
-    reason = gap_reason(ctx, gap, path, prompt)
+    known = known or {}
+    reason = gap_reason(known.get("ctx") or ctx, gap, path, prompt, known.get("usd"))
     r["gap_blocked"] = when
     _log(dict(row, event="gap_block"))
     _save(session_id, r)
@@ -502,6 +530,9 @@ def main():
         cwd = p.get("cwd") or ""
         if event == "PreCompact":   # save what the compaction is about to lose; say nothing
             snapshot(sid, transcript)
+            return 0
+        if event == "SessionStart":   # a resume: keep Claude Code's cache verdict; say nothing
+            remember_resume(sid, transcript, p)
             return 0
         if event == "UserPromptSubmit":   # only a prompt can be held back
             try:

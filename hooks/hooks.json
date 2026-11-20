@@ -32,6 +32,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

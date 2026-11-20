@@ -527,6 +527,105 @@ class Gap(Base):
                 self.assertNotIn("secret plan", f.read())
 
 
+class ResumeFields(Base):
+    """Claude Code 2.1.251+ tells SessionStart on a resume whether the prompt
+    cache likely expired, what the first request re-sends and the re-cache cost.
+    The guard uses those when they're there and estimates from the transcript
+    when they aren't."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ["CONTEXT_LINE_GAP"] = "ttl"
+
+    def resume(self, expired=True, ctx=182_340, usd=1.1396, sid="s1", **extra):
+        payload = {"session_id": sid, "transcript_path": self.transcript,
+                   "hook_event_name": "SessionStart", "source": "resume",
+                   "seconds_since_last_response": 5400, "context_tokens": ctx,
+                   "prompt_cache_likely_expired": expired,
+                   "estimated_cache_write_usd": usd, **extra}
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cl.main(), 0)
+        self.assertEqual(out.getvalue(), "")   # SessionStart says nothing
+
+    def guard(self, **kw):
+        return cl.resume_guard("s1", self.transcript, self.dir, **kw)
+
+    def test_resume_cost_is_shown(self):
+        self.handed_off()
+        self.resume()
+        out = self.guard()
+        self.assertIn("not sent", out)
+        self.assertIn("~182k", out)            # Claude Code's count, not the transcript's
+        self.assertIn("about $1.14 to re-cache", out)
+
+    def test_expired_says_cold_before_the_estimate_would(self):
+        # 30 minutes on an hour cache reads warm from the transcript, but a
+        # compaction or a shorter cache can still have dropped it
+        self.handed_off(secs=30 * 60, cache="1h")
+        self.assertEqual(self.guard(), "")
+        self.resume(expired=True)
+        self.assertIn("not sent", self.guard())
+
+    def test_not_expired_at_resume_still_counts_the_idle(self):
+        # warm when it resumed, then left for two hours before the first prompt
+        self.handed_off(secs=2 * 3600, cache="1h")
+        self.resume(expired=False)
+        out = self.guard()
+        self.assertIn("not sent", out)
+        self.assertIn("$1.14", out)
+
+    def test_warm_resume_goes_through(self):
+        self.handed_off(secs=10 * 60, cache="1h")
+        self.resume(expired=False)
+        self.assertEqual(self.guard(), "")
+
+    def test_older_claude_code_falls_back_to_the_ttl(self):
+        # before 2.1.251 a resume carries none of the fields
+        self.handed_off()
+        payload = {"session_id": "s1", "transcript_path": self.transcript,
+                   "hook_event_name": "SessionStart", "source": "resume"}
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            cl.main()
+        self.assertNotIn("resume", self.state())
+        out = self.guard()
+        self.assertIn("not sent", out)
+        self.assertIn("~200k", out)
+        self.assertNotIn("re-cache", out)
+
+    def test_verdict_from_an_earlier_call_is_ignored(self):
+        self.handed_off(secs=30 * 60, cache="1h")
+        self.resume(expired=True)
+        # the resumed session ran a turn, then sat 10 more minutes: a new last call
+        with open(self.transcript, "a") as f:
+            f.write(json.dumps(usage_row(205_000, ts=time.time() - 600, cache="1h")) + "\n")
+        self.assertEqual(self.guard(), "")
+
+    def test_guard_off_keeps_nothing(self):
+        os.environ.pop("CONTEXT_LINE_GAP")
+        self.handed_off()
+        self.resume()
+        self.assertNotIn("resume", self.state())
+        self.assertEqual(self.guard(), "")
+
+    def test_headless_resume_keeps_nothing(self):
+        self.handed_off()
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            self.resume()
+        self.assertNotIn("resume", self.state())
+
+    def test_odd_field_values_never_break_it(self):
+        self.handed_off()
+        self.resume(expired="yes", ctx="lots", usd="cheap")
+        self.assertNotIn("resume", self.state())   # a bad value means no record
+        self.assertIn("not sent", self.guard())    # and the estimate still works
+
+    def test_resume_stores_no_prompt_or_path(self):
+        self.handed_off()
+        self.resume()
+        self.assertEqual(sorted(self.state()["resume"]), ["ctx", "expired", "usd", "when"])
+
+
 class KeepGoing(Base):
     """After a nudge the user may tell the session to keep going. Later
     growth nudges still give the size but stop asking it to stop."""
@@ -705,14 +804,17 @@ class HookCommand(Base):
         self.assertTrue(os.access(os.path.join(ROOT, "hooks", "run.sh"), os.X_OK))
 
     def test_every_hook_has_a_short_timeout(self):
-        self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5, 5])
+        self.assertEqual([h.get("timeout") for h in self.hooks()], [5, 5, 5, 5])
 
     def test_mid_turn_check_runs_once_per_tool_batch(self):
         # PostToolUse fires once per tool, so parallel calls raced each other
         with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
             events = json.load(f)["hooks"]
-        self.assertEqual(sorted(events), ["PostToolBatch", "PreCompact", "UserPromptSubmit"])
+        self.assertEqual(sorted(events),
+                         ["PostToolBatch", "PreCompact", "SessionStart", "UserPromptSubmit"])
         self.assertNotIn("matcher", events["PostToolBatch"][0])   # the event takes none
+        # only a resume or fork carries the cache fields; startup and /clear can skip it
+        self.assertEqual(events["SessionStart"][0]["matcher"], "resume|fork")
 
     def run_command(self, pythons):
         """Run the hooks.json command (run.sh) with only `pythons` ({name: target}) on PATH."""
