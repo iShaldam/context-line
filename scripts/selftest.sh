@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 missed=0
 fresh() {  # a scratch copy of everything the tests read
   tmp="$(mktemp -d)"
-  cp -R "$root/hooks" "$root/tests" "$root/commands" "$tmp/"
+  cp -R "$root/hooks" "$root/tests" "$root/commands" "$root/scripts" "$tmp/"
 }
 plant() {  # name, sed expression
   fresh
