@@ -148,6 +148,11 @@ still makes sense. On a tight plan, try a lower one.
 - [claude-hud](https://github.com/jarrodwatts/claude-hud) and
   [ccstatusline](https://github.com/sirmalloc/ccstatusline) show context size
   all the time. Use one of them with this: they show, this acts.
+- [session-report](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/session-report),
+  in Anthropic's official marketplace, builds an HTML report of token and
+  cache use from the same local transcripts. `/context-line:report` asks a
+  narrower question: what cutting to a fresh session at the line would have
+  saved, and what cold resumes cost.
 - [context-mode](https://github.com/mksglu/context-mode) keeps big tool output
   out of the window. On my transcripts that would have saved 3.1% of cost,
   against 8.3% for cutting at the line; [docs/comparison.md](docs/comparison.md)
@@ -158,6 +163,10 @@ still makes sense. On a tight plan, try a lower one.
 - [auto-handoff](https://github.com/obie/auto-handoff) writes a handoff after
   50 idle minutes, while the cache is still warm. It triggers on time, this
   one on size, so they don't overlap much.
+- [claude-code-tools](https://github.com/pchalasani/claude-code-tools) has
+  `aichat`, whose rollover resume starts a fresh session from an old one and
+  keeps the chain of past sessions linked. You run it when you decide to;
+  context-line picks the moment and leaves a handoff file you can edit.
 
 ## privacy
 
